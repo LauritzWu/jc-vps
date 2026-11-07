@@ -18,7 +18,7 @@ for file in manager.sh client-template.json; do
     curl -4 -fsSL --retry 2 --connect-timeout 8 --max-time 25 "$source_url/$file" -o "$dir/$file"
 done
 (cd "$dir" && sha256sum -c <<'SHA256'
-ba36d07196ba958d4b4e14d4c82909a609c934e9ccc14672e6400672925ee982  manager.sh
+9acf192aa1f51be3556e26a5bd9c5a758500a73631ddae37c135e006a0532c79  manager.sh
 d96d8e1440c7b53ef47625820c77fe58c95a4ff0cef1f989d68c53ff099a7d7b  client-template.json
 SHA256
 )
@@ -41,6 +41,17 @@ setup() {
     duo packages || return 1
     duo site "$domain" || return 1
     deploy_when_ready "$domain"
+}
+
+quick_install() {
+    local answer
+    if [[ -f /etc/sing-box-reality/config.json && -f /etc/sing-box-hy2/config.json ]]; then
+        read -r -p '检测到主备配置，安装官方软件包并启动现有主备？[y/N] ' answer </dev/tty || return 1
+        [[ "$answer" == y || "$answer" == Y ]] || return 0
+        duo packages && systemctl start sing-box-reality sing-box-hy2
+    else
+        setup
+    fi
 }
 
 deploy_when_ready() {
@@ -513,6 +524,8 @@ while true; do
     option 3 '客户端与订阅'
     option 4 '网络与防火墙'
     option 5 '系统工具'
+    option 6 '一键安装 sing-box'
+    option 7 '删除卸载 sing-box'
     option 0 '退出'
     home_rule "$width"
     vps_summary
@@ -524,6 +537,8 @@ while true; do
         3) client_menu ;;
         4) network_menu ;;
         5) tools_menu ;;
+        6) quick_install || echo '安装未完成，请查看上面的报错。' ;;
+        7) duo uninstall || true ;;
         0) exit 0 ;;
         *) printf '%s\n' '无效选项。' >&2 ;;
     esac

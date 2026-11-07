@@ -96,6 +96,46 @@ APT
     "${apt[@]}" install -y "${target[@]}"
     "$core" version
 }
+uninstall() {
+    local state service pid answer package processes
+    local managed=() owned_pids=()
+    package=$(dpkg-query -W -f='${Status}' sing-box 2>/dev/null) || package=''
+    if [[ $package != 'install ok installed' ]]; then
+        printf '未安装 sing-box 软件包。\n'
+        return
+    fi
+    for service in sing-box-hy2-hopping "$five" "$hy2" "$real"; do
+        state=$(systemctl show -p LoadState --value "$service.service")
+        case "$state" in
+            not-found) continue ;;
+            loaded) managed+=("$service.service") ;;
+            *) fail "无法确认 $service.service 的状态（$state）" ;;
+        esac
+        pid=$(systemctl show -p MainPID --value "$service.service")
+        owned_pids+=("$pid")
+    done
+    processes=$(pgrep -x sing-box) || [[ $? == 1 ]] || fail '无法检查正在运行的 sing-box 进程'
+    for pid in $processes; do
+        [[ " ${owned_pids[*]} " == *" $pid "* ]] || fail "检测到其他 sing-box 进程（PID $pid），请先检查"
+    done
+    dpkg --no-act --remove sing-box
+    if (( ${#managed[@]} )); then
+        printf '将停止并取消开机启动的服务\n'
+        printf '  %s\n' "${managed[@]}"
+    fi
+    printf '%s\n' '将移除 sing-box 软件包，保留配置以便恢复。' \
+        '如果当前 SSH 经过这些节点，请先改用独立的管理连接。'
+    read -r -p '输入 UNINSTALL 确认，或直接回车返回：' answer || return 0
+    if [[ $answer != UNINSTALL ]]; then
+        printf '已取消卸载。\n'
+        return
+    fi
+    if (( ${#managed[@]} )); then
+        systemctl disable --now "${managed[@]}"
+    fi
+    dpkg --remove sing-box
+    printf 'sing-box 软件包已卸载。\n'
+}
 site() {
     valid_domain "$1"
     if grep -qxF "$1:8443 {" "$caddyfile"; then
@@ -626,6 +666,7 @@ help_text() {
     cat <<'HELP'
 Lauritz Duo
   packages [--version VERSION]
+  uninstall
   site DOMAIN
   deploy DOMAIN [--ipv6]
   status [DOMAIN]
@@ -651,6 +692,7 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 case "$command_name" in
     packages) packages "$@";;
+    uninstall) [[ $# == 0 ]] || fail '用法 uninstall'; uninstall;;
     site) [[ $# == 1 ]] || fail '用法 site DOMAIN'; site "$1";;
     deploy)
         [[ $# == 1 || ( $# == 2 && $2 == --ipv6 ) ]] || fail '用法 deploy DOMAIN [--ipv6]'
