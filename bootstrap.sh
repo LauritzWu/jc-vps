@@ -38,6 +38,7 @@ setup() {
     read -r -p '开始安装并配置站点？[y/N] ' answer </dev/tty || return 1
     [[ "$answer" == y || "$answer" == Y ]] || return 0
     duo packages || return 1
+    init_tools || return 1
     duo site "$domain" || return 1
     deploy_when_ready "$domain"
 }
@@ -229,22 +230,19 @@ custom_menu() {
     done
 }
 
-shortcut_menu() {
+install_shortcut() {
     local target=/usr/local/bin/duo temp
-    while true; do
-        heading '管理 Lauritz Duo 快捷命令'
-        option 1 '安装 duo 快捷命令'
-        option 2 '卸载 duo 快捷命令（主备服务继续运行）'
-        choose 1
-        case "$selection" in
-            0) return ;;
-            1)
-                if [[ -e "$target" || -L "$target" ]]; then
-                    echo 'duo 命令已存在，保留现有文件。'
-                    continue
-                fi
-                temp=$(mktemp) || return 1
-                cat > "$temp" <<'DUOSH'
+    if [[ -e "$target" || -L "$target" ]]; then
+        if [[ -f "$target" && ! -L "$target" && -x "$target" ]] &&
+            grep -qxF '# Managed by Lauritz Duo' "$target"; then
+            echo 'duo 快捷命令已安装。'
+            return 0
+        fi
+        echo '发现其他程序使用 /usr/local/bin/duo，保留原文件。' >&2
+        return 1
+    fi
+    temp=$(mktemp) || return 1
+    cat > "$temp" <<'DUOSH'
 #!/usr/bin/env bash
 # Managed by Lauritz Duo
 set -eu
@@ -253,8 +251,37 @@ trap 'rm -f "$f"' EXIT
 curl -4 -fsSL --connect-timeout 8 --max-time 25 https://raw.githubusercontent.com/LauritzWu/lauritz-duo/main/bootstrap.sh -o "$f"
 bash "$f"
 DUOSH
-                if install -m 0755 "$temp" "$target"; then echo '已安装。下次在 SSH 输入 duo 即可打开菜单。'; fi
-                rm -f "$temp" ;;
+    if ! install -m 0755 "$temp" "$target"; then
+        rm -f -- "$temp"
+        return 1
+    fi
+    rm -f -- "$temp"
+    echo 'duo 快捷命令已安装。'
+}
+
+init_tools() {
+    local missing=() pair package tool
+    for pair in qrencode:qrencode openssl:openssl iproute2:ss; do
+        package=${pair%:*}; tool=${pair#*:}
+        command -v "$tool" >/dev/null || missing+=("$package")
+    done
+    if (( ${#missing[@]} )); then
+        apt-get -o Acquire::ForceIPv4=true update &&
+            apt-get -o Acquire::ForceIPv4=true install -y "${missing[@]}" || return 1
+    fi
+    install_shortcut
+}
+
+shortcut_menu() {
+    local target=/usr/local/bin/duo
+    while true; do
+        heading '管理 Lauritz Duo 快捷命令'
+        option 1 '安装 duo 快捷命令'
+        option 2 '卸载 duo 快捷命令（主备服务继续运行）'
+        choose 1
+        case "$selection" in
+            0) return ;;
+            1) install_shortcut || true ;;
             2)
                 if [[ ! -f "$target" || -L "$target" ]] || ! grep -qxF '# Managed by Lauritz Duo' "$target"; then
                     echo '未发现由 Lauritz Duo 安装的快捷命令。'
@@ -429,6 +456,7 @@ tools_menu() {
         option 2 '安装或卸载 duo 快捷命令'
         option 3 '手动覆盖服务器地区'
         option 4 '查看全部命令'
+        option 5 '补齐快捷命令和基础组件'
         choose 1
         case "$selection" in
             0) return ;;
@@ -436,6 +464,9 @@ tools_menu() {
             2) shortcut_menu ;;
             3) set_region || true ;;
             4) duo --help ;;
+            5)
+                read -r -p '补齐快捷命令和缺失的基础组件？[y/N] ' answer </dev/tty || return
+                if [[ "$answer" == y || "$answer" == Y ]]; then init_tools || true; fi ;;
             *) echo '无效选项。' ;;
         esac
     done
