@@ -18,7 +18,7 @@ for file in manager.sh client-template.json; do
     curl -4 -fsSL --retry 2 --connect-timeout 8 --max-time 25 "$source_url/$file" -o "$dir/$file"
 done
 (cd "$dir" && sha256sum -c <<'SHA256'
-9acf192aa1f51be3556e26a5bd9c5a758500a73631ddae37c135e006a0532c79  manager.sh
+7f5140090e10ee986f0b4d8f25ee293ab976b97b9096481e8a6e0cba26201739  manager.sh
 d96d8e1440c7b53ef47625820c77fe58c95a4ff0cef1f989d68c53ff099a7d7b  client-template.json
 SHA256
 )
@@ -525,7 +525,7 @@ while true; do
     option 4 '网络与防火墙'
     option 5 '系统工具'
     option 6 '一键安装 sing-box'
-    option 7 '删除卸载 sing-box'
+    option 7 '完整卸载 Lauritz Duo'
     option 0 '退出'
     home_rule "$width"
     vps_summary
@@ -538,7 +538,7 @@ while true; do
         4) network_menu ;;
         5) tools_menu ;;
         6) quick_install || echo '安装未完成，请查看上面的报错。' ;;
-        7) duo uninstall || true ;;
+        7) if duo uninstall; then exit 0; fi ;;
         0) exit 0 ;;
         *) printf '%s\n' '无效选项。' >&2 ;;
     esac
