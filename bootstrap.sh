@@ -310,13 +310,42 @@ region_file="${XDG_CONFIG_HOME:-$HOME/.config}/lauritz-duo/region"
 
 set_region() {
     local value
-    read -r -p '服务器地区（例如 Los Angeles, US，0 返回）：' value </dev/tty || return
+    read -r -p '服务器地区（例如 Los Angeles, US；auto 恢复自动；0 返回）：' value </dev/tty || return
     [[ "$value" != 0 && -n "$value" ]] || return 0
+    if [[ "$value" == auto ]]; then rm -f -- "$region_file" "${region_file}.auto"; return; fi
     if [[ "$value" =~ [[:cntrl:]] || ${#value} -gt 100 ]]; then
         echo '请输入不超过 100 字的地区名称。'
         return 1
     fi
     mkdir -p "$(dirname "$region_file")" && printf '%s\n' "$value" > "$region_file"
+}
+
+detect_region() {
+    local cache="${region_file}.auto" key=$1 now stamp cached_key cached_value payload value
+    now=$(date +%s)
+    if [[ -r "$cache" ]]; then
+        { IFS= read -r stamp; IFS= read -r cached_key; IFS= read -r cached_value; } < "$cache" || true
+        if [[ "${stamp:-}" =~ ^[0-9]{1,12}$ && "${cached_key:-}" == "$key" ]] &&
+            (( now >= stamp && now - stamp < 86400 )); then
+            printf '%s' "${cached_value:-}"
+            return
+        fi
+    fi
+    payload=$(curl --noproxy '*' -4 -fsS --connect-timeout 2 --max-time 3 https://ipwho.is/ 2>/dev/null) ||
+        payload=$(curl --noproxy '*' -6 -fsS --connect-timeout 2 --max-time 3 https://ipwho.is/ 2>/dev/null) || payload=''
+    value=$(printf '%s' "$payload" | python3 -c '
+import json, sys
+data = json.load(sys.stdin)
+if data.get("success") is not True:
+    sys.exit(1)
+fields = [data.get(k) for k in ("city", "region", "country")]
+fields.append((data.get("connection") or {}).get("isp"))
+print(", ".join(dict.fromkeys(x for x in fields if isinstance(x, str) and x)))
+' 2>/dev/null) || value=''
+    value=$(printf '%s' "$value" | tr -d '[:cntrl:]' | cut -c1-160)
+    mkdir -p "$(dirname "$cache")" &&
+        printf '%s\n%s\n%s\n' "$now" "$key" "$value" > "$cache" || true
+    printf '%s' "$value"
 }
 
 vps_summary() {
@@ -327,6 +356,7 @@ vps_summary() {
     ipv6=$(ip -o -6 addr show scope global 2>/dev/null | awk '$0 !~ / tentative | dadfailed / {sub(/\/.*/,"",$4); printf "%s%s",sep,$4; sep="  "}' || true)
     region=''
     if [[ -r "$region_file" ]]; then IFS= read -r region < "$region_file" || true; fi
+    if [[ -z "$region" ]]; then region=$(detect_region "$ipv4 | $ipv6"); fi
     region=$(printf '%s' "$region" | tr -d '[:cntrl:]')
     kernel=''
     if [[ -x /usr/bin/sing-box ]]; then
@@ -346,7 +376,7 @@ vps_summary() {
     printf ' 主机  %s    系统  %s\n' "$(hostname)" "${os:-未知}"
     printf ' Linux %s    架构  %s    sing-box  %s\n' "$(uname -r)" "$(uname -m)" "${kernel:-未检测到}"
     printf ' IPv4  %s\n IPv6  %s\n' "${ipv4:-未检测到}" "${ipv6:-未检测到}"
-    printf ' 地区  %s\n 服务  %s\n' "${region:-未设置（系统工具 → 设置地区）}" "$active"
+    printf ' 地区  %s\n 服务  %s\n' "${region:-未能识别（系统工具可手动覆盖）}" "$active"
 }
 
 deploy_menu() {
@@ -397,7 +427,7 @@ tools_menu() {
         heading '系统工具'
         option 1 '查看或更新官方内核'
         option 2 '安装或卸载 duo 快捷命令'
-        option 3 '设置服务器地区'
+        option 3 '手动覆盖服务器地区'
         option 4 '查看全部命令'
         choose 1
         case "$selection" in

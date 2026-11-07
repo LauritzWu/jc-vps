@@ -10,7 +10,7 @@
 f=$(mktemp) && curl -4 -fSL --connect-timeout 8 --max-time 25 https://raw.githubusercontent.com/LauritzWu/lauritz-duo/main/bootstrap.sh -o "$f" && bash "$f"; r=$?; if [ -n "$f" ]; then rm -f -- "$f"; fi; (exit "$r")
 ```
 
-首页分为服务状态、安装与部署、客户端与订阅、网络与防火墙、系统工具。支持数字选择、回车默认和子菜单按 0 返回。底部显示系统、接口地址和服务状态。服务器地区可在 5 → 3 手动保存，不会请求第三方地理定位。
+首页分为服务状态、安装与部署、客户端与订阅、网络与防火墙、系统工具。支持数字选择、回车默认和子菜单按 0 返回。底部显示系统、接口地址和服务状态。服务器地区通过 ipwho.is 按 VPS 公网出口 IP 查询并缓存 24 小时。5 → 3 可手动覆盖，已保存的地区优先使用。
 
 ## 已搭好主备的 VPS
 
