@@ -527,8 +527,22 @@ parse_five_ports() {
     done
 }
 
+pick_port() {
+    local flag port rows attempt reserved
+    case "$1" in tcp) flag=-lnt ;; udp) flag=-lnu ;; *) fail '未知传输协议' ;; esac
+    shift
+    reserved=" $* "
+    for ((attempt=0; attempt<100; attempt++)); do
+        port=$((10000 + (RANDOM * 32768 + RANDOM) % 55536))
+        [[ $reserved != *" $port "* ]] || continue
+        rows=$(ss -H "$flag" "( sport = :$port )") || return 1
+        if [[ -z $rows ]]; then printf '%s\n' "$port"; return; fi
+    done
+    fail '未找到可用随机端口'
+}
+
 five_deploy() {
-    local domain=$1 host=$2 ports_text=$3 user=$4 cert private public short ws hp tp ap i port flag rows label attempt
+    local domain=$1 host=$2 ports_text=$3 user=$4 cert private public short ws hp tp ap i port flag rows label
     local ports=() listeners=() used=' ' dir="/etc/$five/profiles"
     valid_ip "$host"
     preflight "$domain"
@@ -540,16 +554,8 @@ five_deploy() {
         flag=-lnt
         [[ ${protocols[i]} == udp ]] && flag=-lnu
         if [[ ${ports[i]} == auto ]]; then
-            port=''
-            for ((attempt=0; attempt<100; attempt++)); do
-                port=$((10000 + (RANDOM * 32768 + RANDOM) % 55536))
-                rows=$(ss -H "$flag" "( sport = :$port )")
-                if [[ -z $rows && $used != *" $port "* ]]; then break; fi
-                port=''
-            done
-            [[ -n $port ]] || fail '未找到可用随机端口'
+            port=$(pick_port "${protocols[i]}" "${ports[@]}")
             ports[i]=$port
-            used+="$port "
         fi
         port=${ports[i]}
         rows=$(ss -H "$flag" "( sport = :$port )")
@@ -731,6 +737,7 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 case "$command_name" in
+    pick-port) [[ $# -ge 1 ]] || fail '缺少传输协议'; pick_port "$@";;
     validate-install)
         [[ $# -ge 2 && $# -le 4 ]] || fail '缺少域名或公网 IPv4'
         valid_domain "$1"
