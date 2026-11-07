@@ -1,4 +1,4 @@
-# Lauritz Duo
+# JC
 
 面向个人 VPS 的 sing-box 管理工具。使用官方 APT 版 sing-box，提供五协议安装向导、Caddy HTTPS 和受密码保护的远程配置，并兼容已有 REALITY / Hysteria 2 主备服务。
 
@@ -17,7 +17,7 @@ s=$(curl -4fsSL -m 25 \
 
 首次运行自动安装 `duo` 快捷命令，并通过 APT 补齐缺失的 jq、qrencode、OpenSSL、iproute2 和 flock。以后输入 `duo` 即可打开菜单。主菜单选「6 一键安装 sing-box」，按顺序选择内核、输入域名和 IPv4、分配端口、生成或填写 UUID，最后确认安装。旧主备仍可在「2 服务管理」启动。
 
-主菜单选「7 完整卸载 Lauritz Duo」后，输入 `1` 确认，输入 `0` 或直接回车取消。确认后会停止 Duo 服务、移除官方软件包，并删除 Duo 节点配置、凭据、订阅文件和快捷命令。Caddy 网站及订阅路由定义、证书、防火墙和手动保存的备份会保留。重新安装时请使用上面的一键命令。
+主菜单选「7 完整卸载 JC」后，输入 `1` 确认，输入 `0` 或直接回车取消。确认后会停止 JC 服务、移除官方软件包，并删除 JC 节点配置、凭据、订阅文件和快捷命令。Caddy 网站及订阅路由定义、证书、防火墙和手动保存的备份会保留。重新安装时请使用上面的一键命令。
 
 ## 已搭好主备的 VPS
 
@@ -36,7 +36,7 @@ publish 使用随附的无凭据模板，从现有 /etc/sing-box-reality 和 /et
 
 - 协议为 REALITY、VMess WS + TLS、Hysteria 2、TUIC 和 AnyTLS。可随机选端口，也可指定五个端口。随机检查本机监听，云防火墙还需单独放行。UUID 可生成或指定，三种密码型协议各自生成密码。
 - 3 → 6 显示五条链接和二维码。3 → 7 发布六份 sing-box JSON 和六份 Base64 链接订阅，含单节点和聚合版本。订阅通过五协议的 REALITY TCP 端口访问，使用 HTTPS Basic Auth。
-- 4 → 1 可按 TCP/UDP 放行指定端口或范围；全开只对已启用的本机 UFW 生效，需手动输入 OPEN-ALL 确认。回退可用 ufw status numbered 找到 Lauritz Duo open all 规则，再用 ufw delete 编号移除。
+- 4 → 1 可按 TCP/UDP 放行指定端口或范围；全开只对已启用的本机 UFW 生效，需手动输入 OPEN-ALL 确认。回退可用 ufw status numbered 找到 JC open all 规则，再用 ufw delete 编号移除。
 - 5 → 1 支持官方 APT 候选版本或指定仓库版本。旧版可能无法加载含 AnyTLS 的配置，升级或降级后先校验配置，再逐个重启服务。
 
 测试凭据下，五协议服务端配置及六份客户端 JSON 已通过 sing-box 检查，订阅内容已验证可解码。实际 VPS 部署、公开端口、认证订阅和各客户端连通需单独验收。

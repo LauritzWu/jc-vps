@@ -13,6 +13,7 @@ five=sing-box-lauritz-five
 template=$(dirname -- "$0")/client-template.json
 kinds=(reality vmess hy2 tuic anytls)
 protocols=(tcp tcp udp udp tcp)
+aliases=(JC-VLESS JC-VMESS JC-HY2 JC-TUIC JC-ANYTLS)
 
 accent='' green='' yellow='' red='' reset=''
 if [[ -t 1 && "${TERM:-dumb}" != dumb && -z "${NO_COLOR:-}" ]]; then
@@ -138,14 +139,14 @@ uninstall() {
         fi
     fi
     if [[ -d $region && ! -L $region ]]; then files+=("$region/region" "$region/region.auto"); fi
-    if [[ -f $shortcut && ! -L $shortcut ]] && grep -qxF '# Managed by Lauritz Duo' "$shortcut"; then
+    if [[ -f $shortcut && ! -L $shortcut ]] && grep -qxF -e '# Managed by JC' -e '# Managed by Lauritz Duo' "$shortcut"; then
         files+=("$shortcut")
     fi
     if (( ${#managed[@]} )); then
         printf '将停止并取消开机启动的服务\n'
         printf '  %s\n' "${managed[@]}"
     fi
-    printf '%s\n' '完整卸载 Lauritz Duo 将移除 sing-box 软件包及 Duo 节点配置、凭据、订阅文件和快捷命令。' \
+    printf '%s\n' '完整卸载 JC 将移除 sing-box 软件包及 JC 节点配置、凭据、订阅文件和快捷命令。' \
         'Caddy 网站、证书、防火墙和手动保存的备份会保留。' \
         '如果当前 SSH 经过这些节点，请先改用独立的管理连接。'
     printf '  %s1. 确认完整卸载（删除节点配置和凭据）%s\n  0. 取消并返回\n' "$red" "$reset"
@@ -161,7 +162,7 @@ uninstall() {
     rm -rf -- "${dirs[@]}"
     if (( ${#files[@]} )); then rm -f -- "${files[@]}"; fi
     systemctl daemon-reload
-    printf '%sLauritz Duo 已完整卸载。%s 重新使用时请运行 GitHub 上的一键命令。\n' "$green" "$reset"
+    printf '%sJC 已完整卸载。%s 重新使用时请运行 GitHub 上的一键命令。\n' "$green" "$reset"
 }
 site() {
     valid_domain "$1"
@@ -203,7 +204,7 @@ unit_file() {
     local service=$1 cap=$2
     put "$units/$service.service" 644 root <<UNIT
 [Unit]
-Description=Lauritz Duo $service
+Description=JC $service
 Wants=network-online.target caddy.service
 After=network-online.target caddy.service
 
@@ -307,7 +308,7 @@ deploy() {
     private_put "$(cfg "$hy2")" <"$scratch/hy2.json"
     printf 'UUID=%s\nPublic key=%s\nShort ID=%s\n' "$user" "$public" "$short" |
         private_put "/etc/$real/client.txt"
-    printf 'hysteria2://%s@%s:443/?sni=%s&insecure=0#Lauritz-Duo-HY2\n' "$password" "$domain" "$domain" |
+    printf 'hysteria2://%s@%s:443/?sni=%s&insecure=0#JC-HY2\n' "$password" "$domain" "$domain" |
         private_put "/etc/$hy2/client-uri.txt"
     unit_file "$real" ''
     unit_file "$hy2" ' CAP_DAC_READ_SEARCH'
@@ -378,7 +379,7 @@ NFT
     created+=("$path")
     put "$units/$unit.service" 644 root <<UNIT
 [Unit]
-Description=Lauritz Duo Hysteria 2 port hopping
+Description=JC Hysteria 2 port hopping
 After=sing-box-hy2.service nftables.service
 
 [Service]
@@ -415,8 +416,8 @@ dual_links() {
     rport=$(jq -er '.inbounds[0].listen_port' "$(cfg "$real")")
     hport=$(jq -er '.inbounds[0].listen_port' "$(cfg "$hy2")")
     password=$(jq -er '.inbounds[0].users[0].password|@uri' "$(cfg "$hy2")")
-    reality_uri "$user" "$domain" "$rport" "$short" Lauritz-Duo-REALITY
-    printf 'hysteria2://%s@%s:%s/?sni=%s&insecure=0#Lauritz-Duo-HY2\n' "$password" "$domain" "$hport" "$domain"
+    reality_uri "$user" "$domain" "$rport" "$short" JC-VLESS
+    printf 'hysteria2://%s@%s:%s/?sni=%s&insecure=0#JC-HY2\n' "$password" "$domain" "$hport" "$domain"
 }
 sync_profile() {
     local host=$1 range=$2 first last table
@@ -432,7 +433,7 @@ sync_profile() {
     fi
     jq --arg host "$host" --arg domain "$domain" --arg public "$public" --arg hop "$range" \
         --slurpfile real "$(cfg "$real")" --slurpfile hy2 "$(cfg "$hy2")" '
-        "Lauritz-Duo-REALITY" as $main | "Lauritz-Duo-HY2" as $backup |
+        "JC-VLESS" as $main | "JC-HY2" as $backup |
         .outbounds as $all |
         ([$all[] | select(.tag=="PROXY" and .type=="selector")]) as $groups |
         if ($groups|length)!=1 then error("需要唯一 PROXY selector") else . end |
@@ -607,14 +608,14 @@ five_deploy() {
     jq '.ins' "$scratch/five.json" | server_doc >"$scratch/server.json"
     check "$scratch/server.json"
     {
-        reality_uri "$user" "$host" "${ports[0]}" "$short" Lauritz-REALITY
+        reality_uri "$user" "$host" "${ports[0]}" "$short" JC-VLESS
         printf 'vmess://'
         DUO_UUID=$user DUO_WS=$ws jq -cn --arg host "$host" --arg port "${ports[1]}" --arg sni "$domain" \
-            '{v:"2",ps:"Lauritz-VMess",add:$host,port:$port,id:$ENV.DUO_UUID,aid:"0",scy:"auto",net:"ws",
+            '{v:"2",ps:"JC-VMESS",add:$host,port:$port,id:$ENV.DUO_UUID,aid:"0",scy:"auto",net:"ws",
               type:"none",path:$ENV.DUO_WS,tls:"tls",sni:$sni,host:$sni}' | base64 -w0
-        printf '\nhysteria2://%s@%s:%s?sni=%s&insecure=0#Lauritz-HY2\n' "$hp" "$host" "${ports[2]}" "$domain"
-        printf 'tuic://%s:%s@%s:%s?sni=%s&alpn=h3#Lauritz-TUIC\n' "$user" "$tp" "$host" "${ports[3]}" "$domain"
-        printf 'anytls://%s@%s:%s?sni=%s#Lauritz-AnyTLS\n' "$ap" "$host" "${ports[4]}" "$domain"
+        printf '\nhysteria2://%s@%s:%s?sni=%s&insecure=0#JC-HY2\n' "$hp" "$host" "${ports[2]}" "$domain"
+        printf 'tuic://%s:%s@%s:%s?sni=%s&alpn=h3#JC-TUIC\n' "$user" "$tp" "$host" "${ports[3]}" "$domain"
+        printf 'anytls://%s@%s:%s?sni=%s#JC-ANYTLS\n' "$ap" "$host" "${ports[4]}" "$domain"
     } >"$scratch/links.txt"
     new_service "$five"
     mkdir -m 700 "$dir"
@@ -626,7 +627,7 @@ five_deploy() {
               .outbounds=($nodes|map(.tag)) | .default=$nodes[0].tag] +
               $nodes + [.outbounds[]|select(.tag=="DIRECT")]) |
             .experimental.cache_file |= (.path=("lauritz-five-"+$label+".db") | .cache_id=("lauritz-five-"+$label))
-        ' "$template" >"$dir/$label.json"
+        ' "$template" | brand_five_json >"$dir/$label.json"
         check "$dir/$label.json"
         if [[ $label == all ]]; then
             base64 -w0 "$scratch/links.txt" >"$dir/$label.sub"
@@ -651,6 +652,56 @@ five_deploy() {
 
 print_link() { printf '%s%s%s\n' "$yellow" "$1" "$reset"; }
 
+brand_five_json() {
+    jq '
+        def alias:
+            {reality:"JC-VLESS",vmess:"JC-VMESS",hy2:"JC-HY2",tuic:"JC-TUIC",anytls:"JC-ANYTLS"}[.] // .;
+        .outbounds |= map(
+            if .tag == "PROXY" and .type == "selector" then
+                .outbounds |= map(alias) | .default |= alias
+            else .tag |= alias end
+        )
+    ' "$@"
+}
+
+refresh_five_aliases() {
+    local dir=$1 i label link
+    local links=()
+    mapfile -t links <"$dir/links.txt"
+    [[ ${#links[@]} == ${#aliases[@]} ]] || fail '五协议链接文件不完整'
+    for i in "${!aliases[@]}"; do
+        link=${links[i]}
+        if [[ $link == vmess://* ]]; then
+            links[i]=$(printf '%s\n' "${link#vmess://}" | jq -Rer --arg label "${aliases[i]}" '
+                "vmess://" + (@base64d | fromjson | .ps=$label | tojson | @base64)
+            ')
+        else
+            links[i]="${link%#*}#${aliases[i]}"
+        fi
+    done
+    printf '%s\n' "${links[@]}" >"$scratch/jc-links.txt"
+    for i in "${!kinds[@]}" all; do
+        if [[ $i == all ]]; then label=all; else label=${kinds[i]}; fi
+        brand_five_json "$dir/$label.json" >"$scratch/$label.json"
+        {
+            if [[ $label == all ]]; then cat "$scratch/jc-links.txt"
+            else printf '%s\n' "${links[i]}"; fi | base64 -w0
+            printf '\n'
+        } >"$scratch/$label.sub"
+    done
+    for label in "${kinds[@]}" all; do
+        local ext
+        for ext in json sub; do
+            if ! cmp -s "$scratch/$label.$ext" "$dir/$label.$ext"; then
+                private_put "$dir/$label.$ext" <"$scratch/$label.$ext"
+            fi
+        done
+    done
+    if ! cmp -s "$scratch/jc-links.txt" "$dir/links.txt"; then
+        private_put "$dir/links.txt" <"$scratch/jc-links.txt"
+    fi
+}
+
 show_qr() {
     print_link "$1"
     if command -v qrencode >/dev/null; then printf '%s' "$1" | qrencode -t ANSIUTF8 -m 2; fi
@@ -665,6 +716,7 @@ five_share() {
     port_number "$port" || fail 'REALITY 端口无效'
     url="https://$domain"
     if [[ $port != 443 ]]; then url+=":$port"; fi
+    refresh_five_aliases "$dir"
     if [[ ${1:-} == --publish ]]; then
         if ! grep -Fq "handle_path $prefix/*" "$caddyfile"; then
             [[ $(grep -cxF "$domain:8443 {" "$caddyfile") == 1 ]] || fail '未找到唯一的 8443 站点'
@@ -701,7 +753,7 @@ CADDY
     printf '%s链接和二维码含节点凭据，请勿公开分享。%s\n' "$yellow" "$reset"
     while IFS= read -r link; do
         label=${kinds[i]}
-        printf '\n%s[%s]%s\n' "$accent" "$label" "$reset"
+        printf '\n%s[%s]%s\n' "$accent" "${aliases[i]}" "$reset"
         show_qr "$link"
         if [[ ${1:-} == --publish ]]; then
             printf '订阅 '; print_link "$url$prefix/$label.sub"
@@ -720,7 +772,7 @@ CADDY
 
 help_text() {
     cat <<'HELP'
-Lauritz Duo
+JC
   packages [--version VERSION]
   uninstall
   site DOMAIN
@@ -741,7 +793,7 @@ case "$command_name" in --help|-h) help_text; exit 0;; esac
 shift
 [[ $OSTYPE == linux* && $EUID == 0 ]] || fail '请在 Ubuntu/Debian VPS 的 root 会话中运行'
 exec 9>/run/lock/sing-box-yg-plus.lock
-flock -n 9 || fail '另一个 Lauritz Duo 操作正在运行'
+flock -n 9 || fail '另一个 JC 操作正在运行'
 scratch=$(mktemp -d)
 trap cleanup EXIT
 trap 'exit 130' INT

@@ -10,7 +10,7 @@ for dependency in curl; do
     fi
 done
 
-printf '%s\n' '正在下载 Lauritz Duo 程序与模板…'
+printf '%s\n' '正在下载 JC 程序与模板…'
 source_url='https://raw.githubusercontent.com/LauritzWu/lauritz-duo/main'
 dir=$(mktemp -d)
 trap 'rm -f "$dir/manager.sh" "$dir/client-template.json"; rmdir "$dir"' EXIT
@@ -18,7 +18,7 @@ for file in manager.sh client-template.json; do
     curl -4 -fsSL --retry 2 --connect-timeout 8 --max-time 25 "$source_url/$file" -o "$dir/$file"
 done
 (cd "$dir" && sha256sum -c <<'SHA256'
-5321e18d1970b75516b5dfe2b07096c6757abc0cbee5ec806887f51706e22101  manager.sh
+d903eb8a8ab15b7e39756de72b99d5e8ea24d8cf97955abe87f06489bd010bdd  manager.sh
 d96d8e1440c7b53ef47625820c77fe58c95a4ff0cef1f989d68c53ff099a7d7b  client-template.json
 SHA256
 )
@@ -198,7 +198,7 @@ client_menu() {
                 read -r -p '请输入 VPS 公网 IPv4（0 返回）：' ip </dev/tty || return
                 [[ "$ip" == 0 ]] && continue
                 if [[ "$selection" == 2 ]]; then
-                    duo export "$ip" "$HOME/lauritz-duo-client-$(date +%s).json" || true
+                    duo export "$ip" "$HOME/jc-client-$(date +%s).json" || true
                 else
                     duo publish "$ip" || true
                 fi ;;
@@ -235,7 +235,7 @@ firewall_menu() {
                 if [[ "$selection" == 4 ]]; then
                     read -r -p '所有监听服务都将暴露。输入 OPEN-ALL 确认：' answer </dev/tty || return
                     if [[ "$answer" == OPEN-ALL ]]; then
-                        ufw insert 1 allow in from any comment 'Lauritz Duo open all' || true
+                        ufw insert 1 allow in from any comment 'JC open all' || true
                     fi
                 else
                     read -r -p '端口和协议（如 8444/tcp 或 20000:20009/udp，0 返回）：' rule </dev/tty || return
@@ -312,7 +312,7 @@ install_shortcut() {
     local target=/usr/local/bin/duo temp
     if [[ -e "$target" || -L "$target" ]]; then
         if [[ -f "$target" && ! -L "$target" && -x "$target" ]] &&
-            grep -qxF '# Managed by Lauritz Duo' "$target"; then
+            grep -qxF -e '# Managed by JC' -e '# Managed by Lauritz Duo' "$target"; then
             echo 'duo 快捷命令已安装。'
             return 0
         fi
@@ -322,7 +322,7 @@ install_shortcut() {
     temp=$(mktemp) || return 1
     cat > "$temp" <<'DUOSH'
 #!/usr/bin/env bash
-# Managed by Lauritz Duo
+# Managed by JC
 set -eu
 f=$(mktemp)
 trap 'rm -f "$f"' EXIT
@@ -353,7 +353,7 @@ init_tools() {
 shortcut_menu() {
     local target=/usr/local/bin/duo
     while true; do
-        heading '管理 Lauritz Duo 快捷命令'
+        heading '管理 JC 快捷命令'
         option 1 '安装 duo 快捷命令'
         option 2 '卸载 duo 快捷命令（主备服务继续运行）'
         choose 1
@@ -361,8 +361,8 @@ shortcut_menu() {
             0) return ;;
             1) install_shortcut || true ;;
             2)
-                if [[ ! -f "$target" || -L "$target" ]] || ! grep -qxF '# Managed by Lauritz Duo' "$target"; then
-                    echo '未发现由 Lauritz Duo 安装的快捷命令。'
+                if [[ ! -f "$target" || -L "$target" ]] || ! grep -qxF -e '# Managed by JC' -e '# Managed by Lauritz Duo' "$target"; then
+                    echo '未发现由 JC 安装的快捷命令。'
                     continue
                 fi
                 read -r -p '卸载 duo 快捷命令？[y/N] ' answer </dev/tty || return
@@ -539,14 +539,14 @@ home_banner() {
            /\                 /\
           /  \               /  \
          / /\ \_____________/ /\ \
-        / /  \               /  \ \       ██████╗ ██╗   ██╗ ██████╗
+        / /  \               /  \ \            ███████╗  ██████╗
        /_/    \             /    \_\      ██╔══██╗██║   ██║██╔═══██╗
        \       ●           ●       /      ██║  ██║██║   ██║██║   ██║
-        \         _______         /       ██║  ██║██║   ██║██║   ██║
-         \       /       \       /        ██████╔╝╚██████╔╝╚██████╔╝
-          \_____ \___▼___/ _____/         ╚═════╝  ╚═════╝  ╚═════╝
+        \         _______         /            ╚══██╔═╝ ██╔════╝
+         \       /       \       /                ██║   ██║
+          \_____ \___▼___/ _____/            ██   ██║   ██║
                 \___/ \___/
-                                          LAURITZ DUO
+                                          JC
                                           GERMAN SHEPHERD EDITION
 SHEPHERD
     elif (( $1 >= 48 )); then
@@ -554,11 +554,11 @@ SHEPHERD
        /\       /\
       /  \_____/  \
      /  ●       ●  \
-     \      ▼      /    LAURITZ DUO
+     \      ▼      /    JC
       \____/ \____/     German Shepherd Edition
 SHEPHERD
     else
-        printf '%s\n' '  /\___/\' ' ( ^ Y ^ )' '  LAURITZ DUO'
+        printf '%s\n' '  /\___/\' ' ( ^ Y ^ )' '  JC'
     fi
     printf '%s' "$reset"
     home_rule "$1"
@@ -576,7 +576,7 @@ while true; do
     option 4 '网络与防火墙'
     option 5 '系统工具'
     option 6 '一键安装 sing-box' "$green"
-    option 7 '完整卸载 Lauritz Duo' "$red"
+    option 7 '完整卸载 JC' "$red"
     option 0 '退出'
     home_rule "$width"
     vps_summary
