@@ -2,6 +2,8 @@
 # SPDX-License-Identifier: GPL-3.0-only
 """Lauritz Duo dual-protocol manager."""
 import argparse
+import base64
+import copy
 import getpass
 import ipaddress
 import json
@@ -82,7 +84,9 @@ def domain_name(value):
     return value
 
 
-def install_packages():
+def install_packages(version=None):
+    if version and not re.fullmatch(r"[0-9][0-9A-Za-z.+:~\-]*", version):
+        raise ValueError("请输入 APT 软件源中的完整版本号")
     if Path("/etc/systemd/system/sing-box.service").exists() and not CORE.exists():
         raise ValueError("发现旧同名服务，先完成迁移或在干净 VPS 上安装")
     if not all(shutil.which(name) for name in ("caddy", "curl")):
@@ -106,7 +110,7 @@ def install_packages():
     if not source.exists():
         write(source, apt_source, 0o644)
     run("apt-get", "-o", "Acquire::ForceIPv4=true", "update")
-    run("apt-get", "-o", "Acquire::ForceIPv4=true", "install", "-y", "sing-box")
+    run("apt-get", "-o", "Acquire::ForceIPv4=true", "install", "-y", *(["--allow-downgrades", f"sing-box={version}"] if version else ["sing-box"]))
     run(CORE, "version")
 
 
@@ -470,6 +474,228 @@ def export_profile(template, ip, output, hop_range):
     print(f"本地客户端配置已写入：{output}。文件含节点凭据。")
 
 
+
+FIVE = (("reality", "tcp"), ("vmess", "tcp"), ("hy2", "udp"), ("tuic", "udp"), ("anytls", "tcp"))
+FIVE_SERVICE = "sing-box-lauritz-five"
+
+
+def five_documents(domain, ports, user, keys, cert, host):
+    short = secrets.token_hex(4)
+    passwords = {kind: secrets.token_hex(24) for kind in ("hy2", "tuic", "anytls")}
+    ws = "/" + secrets.token_hex(12)
+    tls = {"enabled": True, "server_name": domain}
+    cert_tls = {**tls, "certificate_path": str(cert), "key_path": str(cert.with_suffix(".key"))}
+    real_in = {**tls, "reality": {"enabled": True, "private_key": keys["privatekey"],
+               "short_id": [short], "handshake": {"server": "127.0.0.1", "server_port": 8443}}}
+    real_out = {**tls, "utls": {"enabled": True, "fingerprint": "chrome"},
+                "reality": {"enabled": True, "public_key": keys["publickey"], "short_id": short}}
+    ws_options = {"type": "ws", "path": ws}
+    vision = {"uuid": user, "flow": "xtls-rprx-vision"}
+    in_fields = [
+        {"type": "vless", "users": [vision], "tls": real_in},
+        {"type": "vmess", "users": [{"uuid": user}], "transport": ws_options, "tls": cert_tls},
+        {"type": "hysteria2", "users": [{"password": passwords["hy2"]}], "tls": cert_tls},
+        {"type": "tuic", "users": [{"uuid": user, "password": passwords["tuic"]}], "tls": {**cert_tls, "alpn": ["h3"]}},
+        {"type": "anytls", "users": [{"password": passwords["anytls"]}], "tls": cert_tls},
+    ]
+    out_fields = [
+        {"type": "vless", **vision, "tls": real_out},
+        {"type": "vmess", "uuid": user, "security": "auto", "alter_id": 0, "transport": ws_options, "tls": tls},
+        {"type": "hysteria2", "password": passwords["hy2"], "tls": tls},
+        {"type": "tuic", "uuid": user, "password": passwords["tuic"], "tls": {**tls, "alpn": ["h3"]}},
+        {"type": "anytls", "password": passwords["anytls"], "tls": tls},
+    ]
+    inbound = [{"listen": "0.0.0.0", "listen_port": port, **fields} for port, fields in zip(ports, in_fields)]
+    outbound = [{"tag": kind, "server": host, "server_port": port, **fields}
+                for (kind, _), port, fields in zip(FIVE, ports, out_fields)]
+    from urllib.parse import urlencode
+    def uri(scheme, credential, port, label, **params):
+        return f"{scheme}://{credential}@{host}:{port}?{urlencode(params)}#{label}"
+    vmess = dict(v="2", ps="Lauritz-VMess", add=host, port=str(ports[1]), id=user, aid="0",
+                 scy="auto", net="ws", type="none", path=ws, tls="tls", sni=domain, host=domain)
+    links = [
+        uri("vless", user, ports[0], "Lauritz-REALITY", encryption="none", security="reality",
+            sni=domain, fp="chrome", pbk=keys["publickey"], sid=short, type="tcp", flow=vision["flow"]),
+        "vmess://" + base64.b64encode(json.dumps(vmess).encode()).decode(),
+        uri("hysteria2", passwords["hy2"], ports[2], "Lauritz-HY2", sni=domain, insecure=0),
+        uri("tuic", user + ":" + passwords["tuic"], ports[3], "Lauritz-TUIC", sni=domain, alpn="h3"),
+        uri("anytls", passwords["anytls"], ports[4], "Lauritz-AnyTLS", sni=domain),
+    ]
+    server = server_config(inbound[0])
+    server["inbounds"] = inbound
+    return server, outbound, links
+
+
+def five_profiles(directory, template, nodes, links):
+    for label, selected in [("all", nodes), *((n["tag"], [n]) for n in nodes)]:
+        doc = copy.deepcopy(template)
+        selector = next(n for n in doc["outbounds"] if n["tag"] == "PROXY")
+        selector.update(outbounds=[n["tag"] for n in selected], default=selected[0]["tag"])
+        doc["outbounds"] = [selector, *selected, *(n for n in doc["outbounds"] if n["tag"] == "DIRECT")]
+        doc["experimental"]["cache_file"].update(path=f"lauritz-five-{label}.db", cache_id=f"lauritz-five-{label}")
+        data = encode(doc)
+        path = directory / (label + ".json")
+        check_config(path, data)
+        write(path, data)
+    for label, selected in [("all", links), *((n["tag"], [link]) for n, link in zip(nodes, links))]:
+        write(directory / (label + ".sub"), base64.b64encode(("\n".join(selected) + "\n").encode()) + b"\n")
+    write(directory / "links.txt", ("\n".join(links) + "\n").encode())
+
+
+def five_deploy(domain, host, port_text, uuid_text, template):
+    domain = domain_name(domain)
+    host = str(ipaddress.IPv4Address(host))
+    if not ipaddress.ip_address(host).is_global:
+        raise ValueError("请输入公网 IPv4")
+    user = str(uuid.UUID(uuid_text)) if uuid_text else str(uuid.uuid4())
+    path = config_path(FIVE_SERVICE)
+    unit = UNITS / (FIVE_SERVICE + ".service")
+    if path.parent.exists() or unit.exists():
+        raise ValueError("五协议实例已经存在")
+    run("dpkg-query", "-S", CORE, capture=True)
+    cert = find_cert(domain)
+    run("curl", "--noproxy", "*", "-fsS", "--max-time", "8", "--resolve",
+        f"{domain}:8443:127.0.0.1", f"https://{domain}:8443/", capture=True)
+
+    def free(port, protocol):
+        flag = "-lnt" if protocol == "tcp" else "-lnu"
+        return not run("ss", "-H", flag, f"( sport = :{port} )", capture=True).strip()
+
+    if port_text:
+        ports = [int(x) for x in port_text.split(",")]
+    else:
+        ports = []
+        for _, protocol in FIVE:
+            for _ in range(100):
+                candidate = 10000 + secrets.randbelow(55536)
+                if candidate not in ports and free(candidate, protocol):
+                    ports.append(candidate)
+                    break
+            else:
+                raise ValueError("未找到可用随机端口")
+    if len(ports) != 5 or len(set(ports)) != 5 or not all(1 <= p <= 65535 for p in ports):
+        raise ValueError("请输入五个不同的有效端口")
+    if not all(free(port, proto) for port, (_, proto) in zip(ports, FIVE)):
+        raise ValueError("指定端口已被占用")
+    keys = {re.sub(r"[^a-z]", "", k.lower()): v.strip() for k, v in
+            (line.split(":", 1) for line in run(CORE, "generate", "reality-keypair", capture=True).splitlines() if ":" in line)}
+    server, nodes, links = five_documents(domain, ports, user, keys, cert, host)
+    doc = read(template)
+    path.parent.mkdir(mode=0o700)
+    try:
+        check_config(path, encode(server))
+        profiles = path.parent / "profiles"
+        profiles.mkdir(mode=0o700)
+        five_profiles(profiles, doc, nodes, links)
+        write(path, encode(server))
+        write(unit, f"""[Unit]
+Description=Lauritz five-protocol sing-box
+After=network-online.target caddy.service
+Wants=network-online.target
+[Service]
+ExecStart=/usr/bin/sing-box run -c {path}
+Restart=on-failure
+NoNewPrivileges=true
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_DAC_READ_SEARCH
+[Install]
+WantedBy=multi-user.target
+""".encode(), 0o644)
+        run("systemctl", "daemon-reload")
+        run("systemctl", "start", FIVE_SERVICE)
+        for _ in range(10):
+            pid = run("systemctl", "show", "-p", "MainPID", "--value", FIVE_SERVICE, capture=True).strip()
+            if pid != "0" and all(
+                f"pid={pid}," in run("ss", "-H", "-lntp" if proto == "tcp" else "-lnup",
+                                    f"( sport = :{port} )", capture=True)
+                for port, (_, proto) in zip(ports, FIVE)
+            ):
+                break
+            time.sleep(.5)
+        else:
+            raise ValueError("未确认五个端口均由新服务监听")
+    except Exception:
+        if unit.exists():
+            subprocess.run(["systemctl", "stop", FIVE_SERVICE], check=False)
+            unit.unlink()
+            subprocess.run(["systemctl", "daemon-reload"], check=False)
+        shutil.rmtree(path.parent)
+        raise
+    for (kind, protocol), port in zip(FIVE, ports):
+        print(f"{kind:8} {port}/{protocol}")
+    print(f"本机监听已确认。配置与分享链接位于 {profiles}；请用客户端验证后再启用开机启动。")
+
+
+
+def five_share(publish_files):
+    import grp
+    root = config_path(FIVE_SERVICE).parent
+    profiles = root / "profiles"
+    domain = read(root / "config.json")["inbounds"][0]["tls"]["server_name"]
+    labels = [kind for kind, _ in FIVE]
+    names = [f"{label}.{ext}" for label in [*labels, "all"] for ext in ("json", "sub")]
+    if publish_files:
+        prefix = "/profiles/five"
+        destination = PROFILES / "five"
+        source = CADDY.read_text()
+        local = f"https://{domain}:8443{prefix}/"
+        curl = ("curl", "--noproxy", "*", "-sS", "--max-time", "8", "--resolve",
+                f"{domain}:8443:127.0.0.1", "-o", "/dev/null", "-w", "%{http_code}")
+        if f"handle_path {prefix}/*" not in source:
+            password = getpass.getpass("设置五协议订阅密码（16 至 72 字节）：")
+            if not 16 <= len(password.encode()) <= 72 or password != getpass.getpass("再输入一次："):
+                raise ValueError("密码长度不符或两次输入不同")
+            hashed = subprocess.run(["caddy", "hash-password"], input=password + "\n",
+                                    capture_output=True, text=True, check=True).stdout.strip()
+            if not re.fullmatch(r"\$2[aby]\$\d\d\$[./A-Za-z0-9]{53}", hashed):
+                raise ValueError("订阅密码哈希无效")
+            version = re.search(r"v?(\d+)\.(\d+)", run("caddy", "version", capture=True))
+            if not version:
+                raise ValueError("无法识别 Caddy 版本")
+            auth = "basic_auth" if tuple(map(int, version.groups())) >= (2, 8) else "basicauth"
+            marker = f"{domain}:8443 {{"
+            if source.count(marker) != 1:
+                raise ValueError("未找到唯一的现有 8443 站点")
+            block = f"""
+    handle_path {prefix}/* {{
+        {auth} {{
+            lax {hashed}
+        }}
+        header Cache-Control "no-store"
+        root * {destination}
+        file_server
+    }}
+"""
+            reload_site(source.replace(marker, marker + block, 1).encode())
+        if any(run(*curl, local + name, capture=True) != "401" for name in names):
+            raise ValueError("匿名认证检查失败，未发布配置")
+        gid = grp.getgrnam("caddy").gr_gid
+        for directory in (PROFILES, destination):
+            directory.mkdir(mode=0o750, exist_ok=True)
+            os.chown(directory, 0, gid)
+            directory.chmod(0o750)
+        for name in names:
+            write(destination / name, (profiles / name).read_bytes(), 0o640, gid)
+    qr = shutil.which("qrencode")
+    def show(link):
+        print(link, flush=True)
+        if qr:
+            subprocess.run([qr, "-t", "ANSIUTF8", "-m", "2"], input=link, text=True, check=True)
+    links = (profiles / "links.txt").read_text().splitlines()
+    for label, link in zip(labels, links):
+        print(f"\n[{label}]")
+        show(link)
+        if publish_files:
+            print(f"订阅： https://{domain}/profiles/five/{label}.sub")
+            print(f"sing-box： https://{domain}/profiles/five/{label}.json")
+    print("\n全部节点链接：\n" + "\n".join(links))
+    if publish_files:
+        print("聚合订阅，用户名 lax，密码请在客户端输入：")
+        show(f"https://{domain}/profiles/five/all.sub")
+        print(f"聚合 sing-box JSON：https://{domain}/profiles/five/all.json")
+    if not qr:
+        print("可通过 APT 安装 qrencode 后显示二维码。")
+
+
 def status(domain):
     run("systemctl", "--no-pager", "show", *SERVICES, "caddy", "-p", "Id", "-p", "ActiveState",
         "-p", "UnitFileState", "-p", "ExecStart")
@@ -486,7 +712,16 @@ def status(domain):
 def main():
     parser = argparse.ArgumentParser(description="Lauritz Duo · sing-box 双协议管理")
     sub = parser.add_subparsers(dest="command", required=True)
-    sub.add_parser("packages")
+    packages = sub.add_parser("packages")
+    packages.add_argument("--version")
+    share = sub.add_parser("five-share")
+    share.add_argument("--publish", action="store_true")
+    five = sub.add_parser("five")
+    five.add_argument("domain")
+    five.add_argument("ipv4")
+    five.add_argument("--ports", default="")
+    five.add_argument("--uuid", default="")
+    five.add_argument("--template", type=Path, default=Path(__file__).with_name("client-template.json"))
     sub.add_parser("site").add_argument("domain")
     setup = sub.add_parser("deploy")
     setup.add_argument("domain")
@@ -512,7 +747,9 @@ def main():
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             {
-                "packages": lambda: install_packages(),
+                "packages": lambda: install_packages(args.version),
+                "five-share": lambda: five_share(args.publish),
+                "five": lambda: five_deploy(args.domain, args.ipv4, args.ports, args.uuid, args.template),
                 "site": lambda: setup_site(args.domain),
                 "deploy": lambda: deploy(args.domain, args.ipv6),
                 "rules": lambda: update_rules(args.service),

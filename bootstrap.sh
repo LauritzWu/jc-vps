@@ -17,7 +17,7 @@ for file in lauritz-duo.py client-template.json; do
     curl -4 -fsSL --retry 2 --connect-timeout 8 --max-time 25 "$source_url/$file" -o "$dir/$file"
 done
 (cd "$dir" && sha256sum -c <<'SHA256'
-947cd1930e3a8b8235dc48f4e20224080cf190fa2fc85dbf1df3f0b84afbe964  lauritz-duo.py
+06a71d26e069695e0381f3ec8733bd5528f4559898b18436aacdb7b1e525472b  lauritz-duo.py
 d96d8e1440c7b53ef47625820c77fe58c95a4ff0cef1f989d68c53ff099a7d7b  client-template.json
 SHA256
 )
@@ -143,9 +143,25 @@ firewall_menu() {
         heading '本机与云防火墙'
         option 1 '查看本机监听和 UFW 状态'
         option 2 '向已启用的 UFW 添加 TCP 80/443、UDP 443'
+        option 3 '按协议指定单个端口或端口范围'
+        option 4 '放开全部本机入站（需明确确认）'
         choose 1
         case "$selection" in
             0) return ;;
+            3|4)
+                if ! command -v ufw >/dev/null || ! LC_ALL=C ufw status | grep -q '^Status: active'; then
+                    echo '需要已启用的 UFW。云防火墙请在服务商后台配置。'
+                    continue
+                fi
+                if [[ "$selection" == 4 ]]; then
+                    read -r -p '所有监听服务都将暴露。输入 OPEN-ALL 确认：' answer </dev/tty || return
+                    if [[ "$answer" == OPEN-ALL ]]; then
+                        ufw insert 1 allow in from any comment 'Lauritz Duo open all' || true
+                    fi
+                else
+                    read -r -p '端口和协议（如 8444/tcp 或 20000:20009/udp，0 返回）：' rule </dev/tty || return
+                    if [[ "$rule" =~ ^[0-9]{1,5}(:[0-9]{1,5})?/(tcp|udp)$ ]]; then ufw allow "$rule" || true; fi
+                fi ;;
             1)
                 ss -lntup '( sport = :22 or sport = :80 or sport = :443 or sport = :8443 )' || true
                 if command -v ufw >/dev/null; then LC_ALL=C ufw status verbose || true; fi
@@ -169,10 +185,17 @@ core_menu() {
         heading '官方 sing-box 内核'
         option 1 '刷新并查看已安装版本和 APT 候选版本'
         option 2 '安装或升级官方稳定版'
+        option 3 '安装指定的官方 APT 版本'
         choose 1
         case "$selection" in
             0) return ;;
             1) apt-get -o Acquire::ForceIPv4=true update && apt-cache policy sing-box || true ;;
+            3)
+                apt-cache madison sing-box || true
+                read -r -p '输入完整版本号（0 返回）：' version </dev/tty || return
+                [[ "$version" == 0 || -z "$version" ]] && continue
+                read -r -p '安装该版本（可能降级），确认？[y/N] ' answer </dev/tty || return
+                if [[ "$answer" == y || "$answer" == Y ]]; then duo packages --version "$version" || true; fi ;;
             2)
                 read -r -p '安装或升级 APT 稳定版？[y/N] ' answer </dev/tty || return
                 if [[ "$answer" == y || "$answer" == Y ]]; then
@@ -246,6 +269,43 @@ DUOSH
     done
 }
 
+
+five_menu() {
+    local domain ip mode ports id
+    while true; do
+        heading '五协议部署与分享'
+        option 1 '创建独立的五协议服务'
+        option 2 '显示五条节点链接及独立二维码'
+        option 3 '发布单节点与聚合 HTTPS 订阅'
+        choose 2
+        case "$selection" in
+            0) return ;;
+            1)
+                read -r -p '站点域名（已签发证书，0 返回）：' domain </dev/tty || return
+                [[ "$domain" == 0 ]] && continue
+                read -r -p 'VPS 公网 IPv4（0 返回）：' ip </dev/tty || return
+                [[ "$ip" == 0 ]] && continue
+                option 1 '随机选五个未被监听的端口'
+                option 2 '按 REALITY,VMess,HY2,TUIC,AnyTLS 指定五个端口'
+                choose 1
+                mode=$selection; ports=''
+                case "$mode" in
+                    0) continue ;;
+                    1) ;;
+                    2) read -r -p '五个端口，用英文逗号隔开（0 返回）：' ports </dev/tty || return
+                       [[ "$ports" == 0 || -z "$ports" ]] && continue ;;
+                    *) continue ;;
+                esac
+                read -r -p 'UUID（回车自动生成，0 返回）：' id </dev/tty || return
+                [[ "$id" == 0 ]] && continue
+                duo five "$domain" "$ip" --ports "$ports" --uuid "$id" || true ;;
+            2) duo five-share || true ;;
+            3) duo five-share --publish || true ;;
+            *) echo '无效选项。' ;;
+        esac
+    done
+}
+
 while true; do
     heading 'Lauritz Duo · 双协议管理'
     option 1 '检查现有主备服务'
@@ -258,6 +318,7 @@ while true; do
     option 8 '自定义规则与备用端口'
     option 9 '查看全部命令'
     option 10 '安装或卸载 duo 快捷命令'
+    option 11 '五协议部署与分享'
     read -r -p '请选择 [回车默认 1，0 退出]：' selection </dev/tty || exit 1
     case "${selection:-1}" in
         1) duo status || true ;;
@@ -278,6 +339,7 @@ while true; do
         8) custom_menu ;;
         9) duo --help ;;
         10) shortcut_menu ;;
+        11) five_menu ;;
         0) exit 0 ;;
         *) printf '%s\n' '无效选项。' >&2 ;;
     esac
