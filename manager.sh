@@ -144,8 +144,9 @@ uninstall() {
     printf '%s\n' '完整卸载 Lauritz Duo 将移除 sing-box 软件包及 Duo 节点配置、凭据、订阅文件和快捷命令。' \
         'Caddy 网站、证书、防火墙和手动保存的备份会保留。' \
         '如果当前 SSH 经过这些节点，请先改用独立的管理连接。'
-    read -r -p '输入 UNINSTALL-ALL 确认完整卸载，或直接回车返回：' answer || return 2
-    if [[ $answer != UNINSTALL-ALL ]]; then
+    printf '%s\n' '  1. 确认完整卸载（删除节点配置和凭据）' '  0. 取消并返回'
+    read -r -p '请选择 [回车默认 0]：' answer || return 2
+    if [[ $answer != 1 ]]; then
         printf '已取消卸载。\n'
         return 2
     fi

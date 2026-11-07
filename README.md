@@ -14,7 +14,7 @@ f=$(mktemp) && curl -4 -fSL --connect-timeout 8 --max-time 25 https://raw.github
 
 首次运行自动安装 `duo` 快捷命令，并通过 APT 补齐缺失的 jq、qrencode、OpenSSL、iproute2 和 flock。以后输入 `duo` 即可打开菜单。主菜单选「6 一键安装 sing-box」部署主备，或用已有主备配置重新安装并启动。防火墙规则及 UDP 跳跃由对应菜单单独配置。
 
-主菜单选「7 完整卸载 Lauritz Duo」后，输入 `UNINSTALL-ALL` 才会停止 Duo 服务、移除官方软件包，并删除 Duo 节点配置、凭据、订阅文件和快捷命令。Caddy 网站及订阅路由定义、证书、防火墙和手动保存的备份会保留。重新安装时请使用上面的一键命令。
+主菜单选「7 完整卸载 Lauritz Duo」后，输入 `1` 确认，输入 `0` 或直接回车取消。确认后会停止 Duo 服务、移除官方软件包，并删除 Duo 节点配置、凭据、订阅文件和快捷命令。Caddy 网站及订阅路由定义、证书、防火墙和手动保存的备份会保留。重新安装时请使用上面的一键命令。
 
 ## 已搭好主备的 VPS
 
