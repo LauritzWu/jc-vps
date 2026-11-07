@@ -7,10 +7,10 @@
 在 Ubuntu 或 Debian VPS 的 Bash 会话中粘贴。需要 curl 和 Python 3。
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/LauritzWu/lauritz-duo/main/bootstrap.sh)
+f=$(mktemp) && curl -4 -fSL --connect-timeout 8 --max-time 25 https://raw.githubusercontent.com/LauritzWu/lauritz-duo/main/bootstrap.sh -o "$f" && bash "$f"; r=$?; if [ -n "$f" ]; then rm -f -- "$f"; fi; (exit "$r")
 ```
 
-菜单可检查服务、发布订阅或查看全部命令。进入菜单时只下载程序和模板。管理操作从菜单选择后执行。
+菜单可检查服务、发布订阅，也可在新 VPS 上安装软件包和部署双协议。进入菜单时只下载程序和模板。管理操作从菜单选择后执行。
 
 ## 已搭好主备的 VPS
 
