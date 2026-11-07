@@ -10,7 +10,7 @@
 f=$(mktemp) && curl -4 -fSL --connect-timeout 8 --max-time 25 https://raw.githubusercontent.com/LauritzWu/lauritz-duo/main/bootstrap.sh -o "$f" && bash "$f"; r=$?; if [ -n "$f" ]; then rm -f -- "$f"; fi; (exit "$r")
 ```
 
-菜单可检查服务、发布订阅，也可在新 VPS 上安装软件包和部署双协议。进入菜单时只下载程序和模板。管理操作从菜单选择后执行。
+菜单可检查服务、发布订阅，也可在新 VPS 上安装软件包和部署双协议。进入菜单时只下载程序和模板。管理操作从菜单选择后执行。新 VPS 选 4 引导安装、签发证书并部署主备。若证书等待超时，修好 DNS 或 TCP 80 后选 5 续跑。
 
 ## 已搭好主备的 VPS
 
