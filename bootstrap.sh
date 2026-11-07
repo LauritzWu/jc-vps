@@ -18,7 +18,7 @@ for file in manager.sh client-template.json; do
     curl -4 -fsSL --retry 2 --connect-timeout 8 --max-time 25 "$source_url/$file" -o "$dir/$file"
 done
 (cd "$dir" && sha256sum -c <<'SHA256'
-d903eb8a8ab15b7e39756de72b99d5e8ea24d8cf97955abe87f06489bd010bdd  manager.sh
+12a4d8bcdbd4408ca6313fc3aca8ab42b886277332a721e7c2d486665f66ce07  manager.sh
 d96d8e1440c7b53ef47625820c77fe58c95a4ff0cef1f989d68c53ff099a7d7b  client-template.json
 SHA256
 )
@@ -26,6 +26,7 @@ SHA256
 duo() {
     bash "$dir/manager.sh" "$@" </dev/tty
 }
+five_service=$(duo five-service)
 
 pause_menu() {
     read -r -p '按回车返回菜单：' </dev/tty || true
@@ -50,7 +51,7 @@ quick_install() {
     local protocol_ports=() protocol_labels=('VLESS / REALITY (TCP)' 'VMess WS (TCP)' 'Hysteria 2 (UDP)' 'TUIC (UDP)' 'AnyTLS (TCP)')
     local selection port_mode index
     local transports=(tcp tcp udp udp tcp)
-    if [[ -e /etc/sing-box-lauritz-five/config.json || -e /etc/systemd/system/sing-box-lauritz-five.service ]]; then
+    if [[ -e /etc/$five_service/config.json || -e /etc/systemd/system/$five_service.service ]]; then
         echo '已检测到五协议配置。请到 2 管理服务，或到 3 查看节点与订阅。'
         return 0
     fi
@@ -189,7 +190,7 @@ client_menu() {
         option 6 '查看五协议节点链接和二维码'
         option 7 '发布五协议单节点及聚合订阅'
         local default_option=4
-        if [[ -s /etc/sing-box-lauritz-five/profiles/links.txt ]]; then default_option=6; fi
+        if [[ -s /etc/$five_service/profiles/links.txt ]]; then default_option=6; fi
         choose "$default_option"
         case "$selection" in
             0) return ;;
@@ -375,13 +376,17 @@ shortcut_menu() {
 }
 
 
-region_file="${XDG_CONFIG_HOME:-$HOME/.config}/lauritz-duo/region"
+region_file="${XDG_CONFIG_HOME:-$HOME/.config}/jc/region"
+legacy_region_file="${XDG_CONFIG_HOME:-$HOME/.config}/lauritz-duo/region"
 
 set_region() {
     local value
     read -r -p '服务器地区（例如 Los Angeles, US；auto 恢复自动；0 返回）：' value </dev/tty || return
     [[ "$value" != 0 && -n "$value" ]] || return 0
-    if [[ "$value" == auto ]]; then rm -f -- "$region_file" "${region_file}.auto"; return; fi
+    if [[ "$value" == auto ]]; then
+        rm -f -- "$region_file" "${region_file}.auto" "$legacy_region_file"
+        return
+    fi
     if [[ "$value" =~ [[:cntrl:]] || ${#value} -gt 100 ]]; then
         echo '请输入不超过 100 字的地区名称。'
         return 1
@@ -422,7 +427,8 @@ vps_summary() {
     ipv4=$(ip -o -4 addr show scope global 2>/dev/null | awk '{sub(/\/.*/,"",$4); printf "%s%s", sep,$4; sep="  "}' || true)
     ipv6=$(ip -o -6 addr show scope global 2>/dev/null | awk '$0 !~ / tentative | dadfailed / {sub(/\/.*/,"",$4); printf "%s%s",sep,$4; sep="  "}' || true)
     region=''
-    if [[ -r "$region_file" ]]; then IFS= read -r region < "$region_file" || true; fi
+    if [[ -r "$region_file" ]]; then IFS= read -r region < "$region_file" || true
+    elif [[ -r "$legacy_region_file" ]]; then IFS= read -r region < "$legacy_region_file" || true; fi
     if [[ -z "$region" ]]; then region=$(detect_region "$ipv4 | $ipv6"); fi
     region=$(printf '%s' "$region" | tr -d '[:cntrl:]')
     kernel=''
@@ -433,7 +439,7 @@ vps_summary() {
     names=(REALITY HY2 五协议)
     active=''
     local idx=0
-    for unit in sing-box-reality sing-box-hy2 sing-box-lauritz-five; do
+    for unit in sing-box-reality sing-box-hy2 "$five_service"; do
         state='未运行'
         if systemctl is-active --quiet "$unit" 2>/dev/null; then state='运行中'; fi
         active+="${names[idx]} $state  "
@@ -457,10 +463,10 @@ service_menu() {
         choose 1
         case "$selection" in
             0) return ;;
-            1) systemctl start sing-box-lauritz-five && echo '五协议服务已启动。' ;;
+            1) systemctl start "$five_service" && echo '五协议服务已启动。' ;;
             3) systemctl start sing-box-reality sing-box-hy2 && echo '现有主备已启动。' ;;
             2|4)
-                local services=(sing-box-lauritz-five)
+                local services=("$five_service")
                 if [[ $selection == 4 ]]; then services=(sing-box-reality sing-box-hy2); fi
                 read -r -p '客户端验收已经通过？[y/N] ' answer </dev/tty || return
                 if [[ $answer == y || $answer == Y ]]; then

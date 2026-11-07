@@ -9,7 +9,13 @@ units=/etc/systemd/system
 profiles=/var/lib/caddy/private-profiles
 real=sing-box-reality
 hy2=sing-box-hy2
-five=sing-box-lauritz-five
+five=sing-box-jc-five
+# Continue managing units installed before the JC rename.
+legacy_five=sing-box-lauritz-five
+if [[ ! -e /etc/$five && ! -e $units/$five.service ]] &&
+   [[ -e /etc/$legacy_five || -e $units/$legacy_five.service ]]; then
+    five=$legacy_five
+fi
 template=$(dirname -- "$0")/client-template.json
 kinds=(reality vmess hy2 tuic anytls)
 protocols=(tcp tcp udp udp tcp)
@@ -103,7 +109,7 @@ APT
 }
 uninstall() {
     local state service pid answer package processes fragment kind ext
-    local shortcut=/usr/local/bin/duo region="${XDG_CONFIG_HOME:-$HOME/.config}/lauritz-duo"
+    local shortcut=/usr/local/bin/duo region config_home="${XDG_CONFIG_HOME:-$HOME/.config}"
     local managed=() owned_pids=() files=() dirs=()
     package=$(dpkg-query -W -f='${Status}' sing-box 2>/dev/null) || package=''
     for service in sing-box-hy2-hopping "$five" "$hy2" "$real"; do
@@ -138,7 +144,9 @@ uninstall() {
             done
         fi
     fi
-    if [[ -d $region && ! -L $region ]]; then files+=("$region/region" "$region/region.auto"); fi
+    for region in "$config_home/jc" "$config_home/lauritz-duo"; do
+        if [[ -d $region && ! -L $region ]]; then files+=("$region/region" "$region/region.auto"); fi
+    done
     if [[ -f $shortcut && ! -L $shortcut ]] && grep -qxF -e '# Managed by JC' -e '# Managed by Lauritz Duo' "$shortcut"; then
         files+=("$shortcut")
     fi
@@ -626,7 +634,7 @@ five_deploy() {
             .outbounds = ([.outbounds[] | select(.tag=="PROXY") |
               .outbounds=($nodes|map(.tag)) | .default=$nodes[0].tag] +
               $nodes + [.outbounds[]|select(.tag=="DIRECT")]) |
-            .experimental.cache_file |= (.path=("lauritz-five-"+$label+".db") | .cache_id=("lauritz-five-"+$label))
+            .experimental.cache_file |= (.path=("jc-five-"+$label+".db") | .cache_id=("jc-five-"+$label))
         ' "$template" | brand_five_json >"$dir/$label.json"
         check "$dir/$label.json"
         if [[ $label == all ]]; then
@@ -790,6 +798,7 @@ HELP
 
 command_name=${1:---help}
 case "$command_name" in --help|-h) help_text; exit 0;; esac
+if [[ $command_name == five-service ]]; then printf '%s\n' "$five"; exit 0; fi
 shift
 [[ $OSTYPE == linux* && $EUID == 0 ]] || fail '请在 Ubuntu/Debian VPS 的 root 会话中运行'
 exec 9>/run/lock/sing-box-yg-plus.lock
