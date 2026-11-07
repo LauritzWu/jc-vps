@@ -18,7 +18,7 @@ for file in manager.sh client-template.json; do
     curl -4 -fsSL --retry 2 --connect-timeout 8 --max-time 25 "$source_url/$file" -o "$dir/$file"
 done
 (cd "$dir" && sha256sum -c <<'SHA256'
-12a4d8bcdbd4408ca6313fc3aca8ab42b886277332a721e7c2d486665f66ce07  manager.sh
+2d7fa541d10177d67a3351060a7ff06397bf848d6abbba9b0b2bd6fd5a4e389c  manager.sh
 d96d8e1440c7b53ef47625820c77fe58c95a4ff0cef1f989d68c53ff099a7d7b  client-template.json
 SHA256
 )
@@ -120,9 +120,20 @@ quick_install() {
     done
     ports=$(IFS=,; printf '%s' "${protocol_ports[*]}")
     heading '4/5  节点凭据'
-    read -r -p 'UUID（回车自动生成，0 返回）：' uuid </dev/tty || return 1
-    [[ $uuid != 0 ]] || return 0
+    option 1 '自动生成 UUID（回车默认）'
+    option 2 '自定义 UUID'
+    choose 1
+    case "$selection" in
+        0) return 0 ;;
+        1) read -r uuid </proc/sys/kernel/random/uuid || return 1 ;;
+        2)
+            read -r -p "${yellow}请输入 UUID（0 返回）：$reset" uuid </dev/tty || return 1
+            [[ $uuid != 0 ]] || return 0
+            [[ -n $uuid ]] || { echo 'UUID 不能为空。'; return 1; } ;;
+        *) echo '无效选项。'; return 1 ;;
+    esac
     duo validate-install "$domain" "$ip" "$ports" "$uuid" || return 1
+    printf '已确认 UUID：%s%s%s\n' "$green" "$uuid" "$reset"
     heading '5/5  确认安装'
     printf '域名 %s · IPv4 %s\n' "$domain" "$ip"
     for protocol in "${!protocol_labels[@]}"; do
@@ -130,7 +141,7 @@ quick_install() {
         printf '  %s：%s%s%s\n' "${protocol_labels[protocol]}" "$yellow" "$port" "$reset"
     done
     echo '安装后按输出放行各节点端口，再进行客户端验收。'
-    read -r -p "${yellow}开始安装？[y/N] $reset" answer </dev/tty || return 1
+    read -r -p "${yellow}开始安装？[Y/N，回车取消] $reset" answer </dev/tty || return 1
     [[ $answer == y || $answer == Y ]] || return 0
     if [[ -n $version ]]; then
         duo packages --version "$version" || return 1
@@ -207,7 +218,7 @@ client_menu() {
                    '逐条选中节点并打开境外网页，再查询出口 IPv4。两条都应显示 VPS 的公网 IPv4。' \
                    '实测通过后，在「安装与部署」选 4 设置主备开机启动。' ;;
             5)
-                read -r -p '用 APT 安装 qrencode？[y/N] ' answer </dev/tty || return
+                read -r -p '用 APT 安装 qrencode？[Y/N] ' answer </dev/tty || return
                 if [[ "$answer" == y || "$answer" == Y ]]; then
                     apt-get install -y qrencode || true
                 fi ;;
@@ -251,7 +262,7 @@ firewall_menu() {
                     echo '未发现正在运行的 UFW。请按实际防火墙和云平台配置处理。'
                     continue
                 fi
-                read -r -p '添加三条入站规则？[y/N] ' answer </dev/tty || return
+                read -r -p '添加三条入站规则？[Y/N] ' answer </dev/tty || return
                 if [[ "$answer" == y || "$answer" == Y ]]; then
                     ufw allow 80/tcp && ufw allow 443/tcp && ufw allow 443/udp && LC_ALL=C ufw status || true
                 fi ;;
@@ -274,10 +285,10 @@ core_menu() {
                 apt-cache madison sing-box || true
                 read -r -p '输入完整版本号（0 返回）：' version </dev/tty || return
                 [[ "$version" == 0 || -z "$version" ]] && continue
-                read -r -p '安装该版本（可能降级），确认？[y/N] ' answer </dev/tty || return
+                read -r -p '安装该版本（可能降级），确认？[Y/N] ' answer </dev/tty || return
                 if [[ "$answer" == y || "$answer" == Y ]]; then duo packages --version "$version" || true; fi ;;
             2)
-                read -r -p '安装或升级 APT 稳定版？[y/N] ' answer </dev/tty || return
+                read -r -p '安装或升级 APT 稳定版？[Y/N] ' answer </dev/tty || return
                 if [[ "$answer" == y || "$answer" == Y ]]; then
                     duo packages || true
                     echo '已有服务请在备用线路可用时分别重启并复测，以加载新程序。'
@@ -299,7 +310,7 @@ custom_menu() {
             1|2)
                 service=sing-box-hy2
                 [[ "$selection" == 2 ]] && service=sing-box-reality
-                read -r -p "短暂重启 $service，请确认 SSH 走另一条线路 [y/N]：" answer </dev/tty || return
+                read -r -p "短暂重启 $service，请确认 SSH 走另一条线路 [Y/N]：" answer </dev/tty || return
                 if [[ "$answer" == y || "$answer" == Y ]]; then duo rules "$service" || true; fi ;;
             3)
                 read -r -p '输入 UDP 起止端口，用空格分隔（0 返回）：' first last </dev/tty || return
@@ -366,7 +377,7 @@ shortcut_menu() {
                     echo '未发现由 JC 安装的快捷命令。'
                     continue
                 fi
-                read -r -p '卸载 duo 快捷命令？[y/N] ' answer </dev/tty || return
+                read -r -p '卸载 duo 快捷命令？[Y/N] ' answer </dev/tty || return
                 if [[ "$answer" == y || "$answer" == Y ]]; then
                     rm -f -- "$target" && echo '快捷命令已卸载。'
                 fi ;;
@@ -468,7 +479,7 @@ service_menu() {
             2|4)
                 local services=("$five_service")
                 if [[ $selection == 4 ]]; then services=(sing-box-reality sing-box-hy2); fi
-                read -r -p '客户端验收已经通过？[y/N] ' answer </dev/tty || return
+                read -r -p '客户端验收已经通过？[Y/N] ' answer </dev/tty || return
                 if [[ $answer == y || $answer == Y ]]; then
                     local service ready=1
                     for service in "${services[@]}"; do
@@ -513,7 +524,7 @@ tools_menu() {
             3) set_region || true ;;
             4) duo --help ;;
             5)
-                read -r -p '补齐快捷命令和缺失的基础组件？[y/N] ' answer </dev/tty || return
+                read -r -p '补齐快捷命令和缺失的基础组件？[Y/N] ' answer </dev/tty || return
                 if [[ "$answer" == y || "$answer" == Y ]]; then init_tools || true; fi ;;
             *) echo '无效选项。' ;;
         esac

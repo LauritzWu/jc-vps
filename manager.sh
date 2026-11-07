@@ -173,17 +173,18 @@ uninstall() {
     printf '%sJC 已完整卸载。%s 重新使用时请运行 GitHub 上的一键命令。\n' "$green" "$reset"
 }
 site() {
+    local first_line
     valid_domain "$1"
     if grep -qxF "$1:8443 {" "$caddyfile"; then
         printf '站点已存在，继续检查证书。\n'
         return
     fi
     grep -Eq '^[[:space:]]*:80[[:space:]]*\{' "$caddyfile" || fail '未找到 Caddy 默认 :80 站点'
-    if grep -Eq '^[[:space:]]*(\{[[:space:]]*$|auto_https\>)' "$caddyfile"; then
-        fail '检测到自定义 Caddy 全局设置'
-    fi
+    first_line=$(awk '!/^[[:space:]]*(#|$)/ {print; exit}' "$caddyfile")
     {
-        printf '{\n    auto_https disable_redirects\n}\n\n'
+        if [[ ! $first_line =~ ^[[:space:]]*\{([[:space:]]*(#.*)?)$ ]]; then
+            printf '{\n    auto_https disable_redirects\n}\n\n'
+        fi
         cat "$caddyfile"
         cat <<CADDY
 
@@ -491,10 +492,14 @@ profile_dir() {
     chown root:caddy -- "$1"
     chmod 750 -- "$1"
 }
+site_block() {
+    awk -v marker="$1:8443 {" '$0 == marker {inside=1} inside {print} inside && /^}/ {exit}' "$caddyfile"
+}
 publish_dual() {
-    local domain=$1 hash auth
-    if ! grep -Fq '/profiles/lax.json' "$caddyfile"; then
-        [[ $(grep -Ec '^[[:blank:]]*respond "LAX server is online\."[[:blank:]]*$' "$caddyfile") == 1 ]] ||
+    local domain=$1 hash auth block
+    block=$(site_block "$domain")
+    if [[ $block != *'/profiles/lax.json'* ]]; then
+        [[ $(grep -Ec '^[[:blank:]]*respond "LAX server is online\."[[:blank:]]*$' <<<"$block") == 1 ]] ||
             fail 'Caddyfile 与预期不同'
         auth_block
         cat >"$scratch/block" <<CADDY
@@ -511,7 +516,9 @@ publish_dual() {
         respond "LAX server is online."
     }
 CADDY
-        awk -v block="$scratch/block" '/^[[:blank:]]*respond "LAX server is online\."[[:blank:]]*$/ {
+        awk -v marker="$domain:8443 {" -v block="$scratch/block" '
+          $0 == marker {inside=1} /^}/ {inside=0}
+          inside && /^[[:blank:]]*respond "LAX server is online\."[[:blank:]]*$/ {
             while ((getline line < block) > 0) print line; next
         } {print}' "$caddyfile" >"$scratch/Caddyfile"
         reload_site "$scratch/Caddyfile"
@@ -726,7 +733,9 @@ five_share() {
     if [[ $port != 443 ]]; then url+=":$port"; fi
     refresh_five_aliases "$dir"
     if [[ ${1:-} == --publish ]]; then
-        if ! grep -Fq "handle_path $prefix/*" "$caddyfile"; then
+        local block
+        block=$(site_block "$domain")
+        if [[ $block != *"handle_path $prefix/*"* ]]; then
             [[ $(grep -cxF "$domain:8443 {" "$caddyfile") == 1 ]] || fail '未找到唯一的 8443 站点'
             auth_block
             cat >"$scratch/block" <<CADDY
