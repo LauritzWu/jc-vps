@@ -72,7 +72,8 @@ choose() {
 }
 
 node_links() {
-    python3 - <<'PYLINKS'
+    local links link
+    links=$(python3 - <<'PYLINKS'
 import json
 from pathlib import Path
 from urllib.parse import urlencode, quote
@@ -86,20 +87,32 @@ query = urlencode(dict(encryption="none", security="reality", sni=domain, fp="ch
                        pbk=saved["Public key"], sid=tls["reality"]["short_id"][0],
                        type="tcp", flow=real["users"][0]["flow"]))
 hy2 = json.loads(Path("/etc/sing-box-hy2/config.json").read_text())["inbounds"][0]
-print("复制以下链接到客户端。链接含凭据，请勿截图或转发。")
 print(f'vless://{real["users"][0]["uuid"]}@{domain}:{real["listen_port"]}?{query}#Lauritz-Duo-REALITY')
 print(f'hysteria2://{quote(hy2["users"][0]["password"], safe="")}@{domain}:{hy2["listen_port"]}/?'
       + urlencode(dict(sni=domain, insecure="0")) + "#Lauritz-Duo-HY2")
 PYLINKS
+) || return 1
+    printf '%s\n' '每条链接及其二维码均含凭据，请勿截图或转发。'
+    while IFS= read -r link; do
+        heading "${link##*#}"
+        printf '%s\n' "$link"
+        if command -v qrencode >/dev/null; then
+            printf '%s' "$link" | qrencode -t ANSIUTF8 -m 2 || return 1
+        fi
+    done <<< "$links"
+    if ! command -v qrencode >/dev/null; then
+        echo '需要终端二维码时，请在客户端子菜单选 5 安装 qrencode。'
+    fi
 }
 
 client_menu() {
     while true; do
         heading '客户端配置与验收'
-        option 1 '显示 v2rayN 导入链接'
+        option 1 '显示两条独立的导入链接和二维码'
         option 2 '导出 sing-box JSON（固定 IPv4）'
         option 3 '发布或更新 HTTPS 订阅'
         option 4 '查看客户端验收步骤'
+        option 5 '安装终端二维码工具 qrencode'
         choose 4
         case "$selection" in
             0) return ;;
@@ -115,6 +128,11 @@ client_menu() {
             4) printf '%s\n' '在 v2rayN 从剪贴板导入两条链接，或把导出的 JSON 导入 sing-box。' \
                    '逐条选中节点并打开境外网页，再查询出口 IPv4。两条都应显示 VPS 的公网 IPv4。' \
                    '实测通过后，在主菜单选择 6 设置主备开机启动。' ;;
+            5)
+                read -r -p '用 APT 安装 qrencode？[y/N] ' answer </dev/tty || return
+                if [[ "$answer" == y || "$answer" == Y ]]; then
+                    apt-get install -y qrencode || true
+                fi ;;
             *) echo '无效选项。' ;;
         esac
     done
@@ -188,6 +206,46 @@ custom_menu() {
     done
 }
 
+shortcut_menu() {
+    local target=/usr/local/bin/duo temp
+    while true; do
+        heading '管理 Lauritz Duo 快捷命令'
+        option 1 '安装 duo 快捷命令'
+        option 2 '卸载 duo 快捷命令（主备服务继续运行）'
+        choose 1
+        case "$selection" in
+            0) return ;;
+            1)
+                if [[ -e "$target" || -L "$target" ]]; then
+                    echo 'duo 命令已存在，保留现有文件。'
+                    continue
+                fi
+                temp=$(mktemp) || return 1
+                cat > "$temp" <<'DUOSH'
+#!/usr/bin/env bash
+# Managed by Lauritz Duo
+set -eu
+f=$(mktemp)
+trap 'rm -f "$f"' EXIT
+curl -4 -fsSL --connect-timeout 8 --max-time 25 https://raw.githubusercontent.com/LauritzWu/lauritz-duo/main/bootstrap.sh -o "$f"
+bash "$f"
+DUOSH
+                if install -m 0755 "$temp" "$target"; then echo '已安装。下次在 SSH 输入 duo 即可打开菜单。'; fi
+                rm -f "$temp" ;;
+            2)
+                if [[ ! -f "$target" || -L "$target" ]] || ! grep -qxF '# Managed by Lauritz Duo' "$target"; then
+                    echo '未发现由 Lauritz Duo 安装的快捷命令。'
+                    continue
+                fi
+                read -r -p '卸载 duo 快捷命令？[y/N] ' answer </dev/tty || return
+                if [[ "$answer" == y || "$answer" == Y ]]; then
+                    rm -f -- "$target" && echo '快捷命令已卸载。'
+                fi ;;
+            *) echo '无效选项。' ;;
+        esac
+    done
+}
+
 while true; do
     heading 'Lauritz Duo · 双协议管理'
     option 1 '检查现有主备服务'
@@ -199,6 +257,7 @@ while true; do
     option 7 '查看或更新官方内核'
     option 8 '自定义规则与备用端口'
     option 9 '查看全部命令'
+    option 10 '安装或卸载 duo 快捷命令'
     read -r -p '请选择 [回车默认 1，0 退出]：' selection </dev/tty || exit 1
     case "${selection:-1}" in
         1) duo status || true ;;
@@ -218,6 +277,7 @@ while true; do
         7) core_menu ;;
         8) custom_menu ;;
         9) duo --help ;;
+        10) shortcut_menu ;;
         0) exit 0 ;;
         *) printf '%s\n' '无效选项。' >&2 ;;
     esac
