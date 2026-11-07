@@ -2,6 +2,16 @@
 
 面向个人 VPS 的 sing-box 双协议管理工具。使用官方 APT 版 sing-box，提供 REALITY 主线、Hysteria 2 备用、Caddy HTTPS、国内目标拒绝规则和受密码保护的远程配置。
 
+## 一键打开菜单
+
+在 Ubuntu 或 Debian VPS 的 Bash 会话中粘贴。需要 curl 和 Python 3。
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/LauritzWu/lauritz-duo/main/bootstrap.sh)
+```
+
+菜单可检查服务、发布订阅或查看全部命令。进入菜单时只下载程序和模板。管理操作从菜单选择后执行。
+
 ## 已搭好主备的 VPS
 
 先把本目录传到 VPS。通过 SSH 运行以下命令，替换示例域名和 IPv4。
