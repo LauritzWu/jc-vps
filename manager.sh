@@ -14,7 +14,11 @@ template=$(dirname -- "$0")/client-template.json
 kinds=(reality vmess hy2 tuic anytls)
 protocols=(tcp tcp udp udp tcp)
 
-fail() { printf '操作未完成：%s\n' "$*" >&2; exit 1; }
+accent='' green='' yellow='' red='' reset=''
+if [[ -t 1 && "${TERM:-dumb}" != dumb && -z "${NO_COLOR:-}" ]]; then
+    accent=$'\033[1;36m'; green=$'\033[1;32m'; yellow=$'\033[1;33m'; red=$'\033[1;31m'; reset=$'\033[0m'
+fi
+fail() { printf '%s操作未完成：%s%s\n' "$red" "$*" "$reset" >&2; exit 1; }
 cfg() { printf '/etc/%s/config.json' "$1"; }
 fetch() { curl -4 -fsSL --retry 2 --connect-timeout 8 --max-time 25 "$@"; }
 put() {
@@ -144,8 +148,8 @@ uninstall() {
     printf '%s\n' '完整卸载 Lauritz Duo 将移除 sing-box 软件包及 Duo 节点配置、凭据、订阅文件和快捷命令。' \
         'Caddy 网站、证书、防火墙和手动保存的备份会保留。' \
         '如果当前 SSH 经过这些节点，请先改用独立的管理连接。'
-    printf '%s\n' '  1. 确认完整卸载（删除节点配置和凭据）' '  0. 取消并返回'
-    read -r -p '请选择 [回车默认 0]：' answer || return 2
+    printf '  %s1. 确认完整卸载（删除节点配置和凭据）%s\n  0. 取消并返回\n' "$red" "$reset"
+    read -r -p "${yellow}请选择 [回车默认 0]：$reset" answer || return 2
     if [[ $answer != 1 ]]; then
         printf '已取消卸载。\n'
         return 2
@@ -157,7 +161,7 @@ uninstall() {
     rm -rf -- "${dirs[@]}"
     if (( ${#files[@]} )); then rm -f -- "${files[@]}"; fi
     systemctl daemon-reload
-    printf 'Lauritz Duo 已完整卸载。重新使用时请运行 GitHub 上的一键命令。\n'
+    printf '%sLauritz Duo 已完整卸载。%s 重新使用时请运行 GitHub 上的一键命令。\n' "$green" "$reset"
 }
 site() {
     valid_domain "$1"
@@ -509,7 +513,9 @@ CADDY
         private_put "/root/lax-profile-before.$(date +%s%N).json" <"$profiles/lax.json"
     fi
     put "$profiles/lax.json" 640 caddy <"$scratch/profile.json"
-    printf '订阅已发布 https://%s/profiles/lax.json\n用户名 lax，请在客户端验证认证后可下载。\n' "$domain"
+    printf '%s订阅已发布%s\n' "$green" "$reset"
+    print_link "https://$domain/profiles/lax.json"
+    printf '用户名 lax，请在客户端验证认证后可下载。\n'
 }
 
 parse_five_ports() {
@@ -638,13 +644,15 @@ five_deploy() {
     systemctl start "$five"
     socket_ready "$five" "${listeners[@]}" || fail '未确认五个端口均由新服务监听'
     for i in "${!kinds[@]}"; do
-        printf '已监听 %-8s %s\n' "${kinds[i]}" "${listeners[i]}"
+        printf '已监听 %-8s %s%s%s\n' "${kinds[i]}" "$green" "${listeners[i]}" "$reset"
     done
     printf '客户端配置与分享链接位于 %s\n' "$dir"
 }
 
+print_link() { printf '%s%s%s\n' "$yellow" "$1" "$reset"; }
+
 show_qr() {
-    printf '%s\n' "$1"
+    print_link "$1"
     if command -v qrencode >/dev/null; then printf '%s' "$1" | qrencode -t ANSIUTF8 -m 2; fi
 }
 
@@ -690,21 +698,23 @@ CADDY
             done
         done
     fi
+    printf '%s链接和二维码含节点凭据，请勿公开分享。%s\n' "$yellow" "$reset"
     while IFS= read -r link; do
         label=${kinds[i]}
-        printf '\n[%s]\n' "$label"
+        printf '\n%s[%s]%s\n' "$accent" "$label" "$reset"
         show_qr "$link"
         if [[ ${1:-} == --publish ]]; then
-            printf '订阅 %s%s/%s.sub\nsing-box %s%s/%s.json\n' "$url" "$prefix" "$label" "$url" "$prefix" "$label"
+            printf '订阅 '; print_link "$url$prefix/$label.sub"
+            printf 'sing-box '; print_link "$url$prefix/$label.json"
         fi
         i=$((i+1))
     done <"$dir/links.txt"
-    printf '\n全部节点链接\n'
-    cat "$dir/links.txt"
+    printf '\n%s全部节点链接%s\n' "$accent" "$reset"
+    while IFS= read -r link; do print_link "$link"; done <"$dir/links.txt"
     if [[ ${1:-} == --publish ]]; then
-        printf '\n聚合订阅，用户名 lax\n'
+        printf '\n%s聚合订阅，用户名 lax%s\n' "$accent" "$reset"
         show_qr "$url$prefix/all.sub"
-        printf '聚合 sing-box JSON %s%s/all.json\n' "$url" "$prefix"
+        printf '聚合 sing-box JSON '; print_link "$url$prefix/all.json"
     fi
 }
 

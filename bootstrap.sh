@@ -18,7 +18,7 @@ for file in manager.sh client-template.json; do
     curl -4 -fsSL --retry 2 --connect-timeout 8 --max-time 25 "$source_url/$file" -o "$dir/$file"
 done
 (cd "$dir" && sha256sum -c <<'SHA256'
-cb1292016bdeea6203f81d0f9f88c831a3da2a46794d80ac06b71746156c8958  manager.sh
+5321e18d1970b75516b5dfe2b07096c6757abc0cbee5ec806887f51706e22101  manager.sh
 d96d8e1440c7b53ef47625820c77fe58c95a4ff0cef1f989d68c53ff099a7d7b  client-template.json
 SHA256
 )
@@ -41,7 +41,7 @@ wait_for_certificate() {
         fi
         if (( attempt < 15 )); then sleep 3; fi
     done
-    echo '证书暂未就绪。检查 DNS 和公网 TCP 80，查看 journalctl -u caddy -n 30 --no-pager，然后重新选择 6。' >&2
+    printf '%s%s%s\n' "$red" '证书暂未就绪。检查 DNS 和公网 TCP 80，查看 journalctl -u caddy -n 30 --no-pager，然后重新选择 6。' "$reset" >&2
     return 1
 }
 
@@ -100,7 +100,7 @@ quick_install() {
         port=''
         if [[ $port_mode == 2 ]]; then
             while true; do
-                read -r -p "$protocol 端口：" port </dev/tty || return 1
+                read -r -p "$yellow$protocol 端口：$reset" port </dev/tty || return 1
                 [[ $port != 0 ]] || return 0
                 [[ -n $port ]] || break
                 if [[ $port =~ ^[1-9][0-9]{0,4}$ ]] && (( port <= 65535 )); then
@@ -113,7 +113,7 @@ quick_install() {
         fi
         if [[ -z $port ]]; then
             port=$(duo pick-port "${transports[index]}" "${protocol_ports[@]}") || return 1
-            printf '  %s 已自动选定：%s\n' "$protocol" "$port"
+            printf '  %s 已自动选定：%s%s%s\n' "$protocol" "$green" "$port" "$reset"
         fi
         protocol_ports+=("$port")
     done
@@ -126,10 +126,10 @@ quick_install() {
     printf '域名 %s · IPv4 %s\n' "$domain" "$ip"
     for protocol in "${!protocol_labels[@]}"; do
         port=${protocol_ports[protocol]}
-        printf '  %s：%s\n' "${protocol_labels[protocol]}" "$port"
+        printf '  %s：%s%s%s\n' "${protocol_labels[protocol]}" "$yellow" "$port" "$reset"
     done
     echo '安装后按输出放行各节点端口，再进行客户端验收。'
-    read -r -p '开始安装？[y/N] ' answer </dev/tty || return 1
+    read -r -p "${yellow}开始安装？[y/N] $reset" answer </dev/tty || return 1
     [[ $answer == y || $answer == Y ]] || return 0
     if [[ -n $version ]]; then
         duo packages --version "$version" || return 1
@@ -141,7 +141,7 @@ quick_install() {
         duo site "$domain" && wait_for_certificate "$domain" || return 1
     fi
     duo five "$domain" "$ip" --ports "$ports" --uuid "$uuid" || return 1
-    heading '五协议安装成功 · 本机监听已确认'
+    printf '\n%s五协议安装成功 · 本机监听已确认%s\n' "$green" "$reset"
     echo '请在云防火墙放行上面列出的 TCP/UDP 端口。外网验收通过后，在主菜单 2 启用开机启动。'
     option 1 '查看五条节点链接和二维码（含凭据）'
     option 2 '稍后在客户端与订阅菜单查看'
@@ -150,25 +150,25 @@ quick_install() {
 }
 
 if [[ -t 1 && "${TERM:-dumb}" != dumb && -z "${NO_COLOR:-}" ]]; then
-    accent=$'\033[1;36m'; green=$'\033[1;32m'; reset=$'\033[0m'
+    accent=$'\033[1;36m'; green=$'\033[1;32m'; yellow=$'\033[1;33m'; red=$'\033[1;31m'; reset=$'\033[0m'
 else
-    accent=''; green=''; reset=''
+    accent=''; green=''; yellow=''; red=''; reset=''
 fi
 
 heading() { printf '\n%s%s%s\n' "$accent" "$1" "$reset"; }
-option() { printf ' %s%s.%s %s\n' "$green" "$1" "$reset" "$2"; }
+option() { printf ' %s%s.%s %s%s%s\n' "$green" "$1" "$reset" "${3:-$accent}" "$2" "$reset"; }
 choose() {
-    read -r -p "请选择 [默认 $1，0 返回]：" selection </dev/tty || exit 1
+    read -r -p "${yellow}请选择 [默认 $1，0 返回]：$reset" selection </dev/tty || exit 1
     selection=${selection:-$1}
 }
 
 node_links() {
     local links link
     links=$(duo links) || return 1
-    printf '%s\n' '每条链接及其二维码均含凭据，请勿截图或转发。'
+    printf '%s每条链接及其二维码均含凭据，请勿截图或转发。%s\n' "$yellow" "$reset"
     while IFS= read -r link; do
         heading "${link##*#}"
-        printf '%s\n' "$link"
+        printf '%s%s%s\n' "$yellow" "$link" "$reset"
         if command -v qrencode >/dev/null; then
             printf '%s' "$link" | qrencode -t ANSIUTF8 -m 2 || return 1
         fi
@@ -575,13 +575,13 @@ while true; do
     option 3 '客户端与订阅'
     option 4 '网络与防火墙'
     option 5 '系统工具'
-    option 6 '一键安装 sing-box'
-    option 7 '完整卸载 Lauritz Duo'
+    option 6 '一键安装 sing-box' "$green"
+    option 7 '完整卸载 Lauritz Duo' "$red"
     option 0 '退出'
     home_rule "$width"
     vps_summary
     home_rule "$width"
-    read -r -p '请选择 [回车默认 1，0 退出]：' selection </dev/tty || exit 1
+    read -r -p "${yellow}请选择 [回车默认 1，0 退出]：$reset" selection </dev/tty || exit 1
     case "${selection:-1}" in
         1) duo status || true ;;
         2) service_menu ;;
