@@ -53,7 +53,7 @@ deploy_when_ready() {
         fi
         sleep 3
     done
-    printf '%s\n' '证书暂未就绪。检查 DNS 和公网 TCP 80，查看 journalctl -u caddy -n 30 --no-pager。修好后选 5 续跑。' >&2
+    printf '%s\n' '证书暂未就绪。检查 DNS 和公网 TCP 80，查看 journalctl -u caddy -n 30 --no-pager。修好后在「安装与部署」选 2 续跑。' >&2
     return 1
 }
 
@@ -127,7 +127,7 @@ client_menu() {
                 fi ;;
             4) printf '%s\n' '在 v2rayN 从剪贴板导入两条链接，或把导出的 JSON 导入 sing-box。' \
                    '逐条选中节点并打开境外网页，再查询出口 IPv4。两条都应显示 VPS 的公网 IPv4。' \
-                   '实测通过后，在主菜单选择 6 设置主备开机启动。' ;;
+                   '实测通过后，在「安装与部署」选 4 设置主备开机启动。' ;;
             5)
                 read -r -p '用 APT 安装 qrencode？[y/N] ' answer </dev/tty || return
                 if [[ "$answer" == y || "$answer" == Y ]]; then
@@ -306,40 +306,141 @@ five_menu() {
     done
 }
 
+region_file="${XDG_CONFIG_HOME:-$HOME/.config}/lauritz-duo/region"
+
+set_region() {
+    local value
+    read -r -p '服务器地区（例如 Los Angeles, US，0 返回）：' value </dev/tty || return
+    [[ "$value" != 0 && -n "$value" ]] || return 0
+    if [[ "$value" =~ [[:cntrl:]] || ${#value} -gt 100 ]]; then
+        echo '请输入不超过 100 字的地区名称。'
+        return 1
+    fi
+    mkdir -p "$(dirname "$region_file")" && printf '%s\n' "$value" > "$region_file"
+}
+
+vps_summary() {
+    local os ipv4 ipv6 region kernel active unit state names
+    os=$(awk -F= '$1=="PRETTY_NAME" {print substr($0,index($0,"=")+1); exit}' /etc/os-release 2>/dev/null || true)
+    os=${os#\"}; os=${os%\"}
+    ipv4=$(ip -o -4 addr show scope global 2>/dev/null | awk '{sub(/\/.*/,"",$4); printf "%s%s", sep,$4; sep="  "}' || true)
+    ipv6=$(ip -o -6 addr show scope global 2>/dev/null | awk '$0 !~ / tentative | dadfailed / {sub(/\/.*/,"",$4); printf "%s%s",sep,$4; sep="  "}' || true)
+    region=''
+    if [[ -r "$region_file" ]]; then IFS= read -r region < "$region_file" || true; fi
+    region=$(printf '%s' "$region" | tr -d '[:cntrl:]')
+    kernel=''
+    if [[ -x /usr/bin/sing-box ]]; then
+        kernel=$(/usr/bin/sing-box version 2>/dev/null | sed -n '1p' || true)
+        kernel=${kernel#sing-box version }
+    fi
+    names=(REALITY HY2 五协议)
+    active=''
+    local idx=0
+    for unit in sing-box-reality sing-box-hy2 sing-box-lauritz-five; do
+        state='未运行'
+        if systemctl is-active --quiet "$unit" 2>/dev/null; then state='运行中'; fi
+        active+="${names[idx]} $state  "
+        idx=$((idx+1))
+    done
+    heading 'VPS 概况'
+    printf ' 主机  %s    系统  %s\n' "$(hostname)" "${os:-未知}"
+    printf ' Linux %s    架构  %s    sing-box  %s\n' "$(uname -r)" "$(uname -m)" "${kernel:-未检测到}"
+    printf ' IPv4  %s\n IPv6  %s\n' "${ipv4:-未检测到}" "${ipv6:-未检测到}"
+    printf ' 地区  %s\n 服务  %s\n' "${region:-未设置（系统工具 → 设置地区）}" "$active"
+}
+
+deploy_menu() {
+    local domain answer
+    while true; do
+        heading '安装与部署'
+        option 1 '新 VPS：引导安装主备'
+        option 2 '继续部署（网站已配置）'
+        option 3 '五协议部署与分享'
+        option 4 '主备开机启动（客户端验收后）'
+        choose 1
+        case "$selection" in
+            0) return ;;
+            1) setup || echo '安装未完成，请查看上面的报错。' ;;
+            2)
+                read -r -p '请输入站点域名（0 返回）：' domain </dev/tty || return
+                [[ "$domain" == 0 ]] || deploy_when_ready "$domain" || true ;;
+            3) five_menu ;;
+            4)
+                read -r -p '两条线路已通过客户端验收？[y/N] ' answer </dev/tty || return
+                if [[ "$answer" == y || "$answer" == Y ]]; then
+                    systemctl is-active --quiet sing-box-reality &&
+                        systemctl is-active --quiet sing-box-hy2 &&
+                        systemctl enable sing-box-reality sing-box-hy2 || echo '请先确认主备都在运行。'
+                fi ;;
+            *) echo '无效选项。' ;;
+        esac
+    done
+}
+
+network_menu() {
+    while true; do
+        heading '网络与防火墙'
+        option 1 '监听端口与防火墙'
+        option 2 '国内规则与 UDP 跳跃'
+        choose 1
+        case "$selection" in
+            0) return ;;
+            1) firewall_menu ;;
+            2) custom_menu ;;
+            *) echo '无效选项。' ;;
+        esac
+    done
+}
+
+tools_menu() {
+    while true; do
+        heading '系统工具'
+        option 1 '查看或更新官方内核'
+        option 2 '安装或卸载 duo 快捷命令'
+        option 3 '设置服务器地区'
+        option 4 '查看全部命令'
+        choose 1
+        case "$selection" in
+            0) return ;;
+            1) core_menu ;;
+            2) shortcut_menu ;;
+            3) set_region || true ;;
+            4) duo --help ;;
+            *) echo '无效选项。' ;;
+        esac
+    done
+}
+
+home_banner() {
+    printf '\n%s' "$accent"
+    cat <<'SHEPHERD'
+      /\     /\
+     /  \___/  \
+    /  ^     ^  \      LAURITZ DUO
+   (      Y      )     German Shepherd Edition
+    \    /_\    /
+     \___\_/___/
+SHEPHERD
+    printf '%s%s\n' "$reset" '────────────────────────────────────'
+}
+
 while true; do
-    heading 'Lauritz Duo · 双协议管理'
-    option 1 '检查现有主备服务'
-    option 2 '客户端导入、订阅与验收'
-    option 3 '端口与防火墙'
-    option 4 '新 VPS：引导安装主备'
-    option 5 '继续部署（网站已配置）'
-    option 6 '主备设为开机启动（客户端验收通过后）'
-    option 7 '查看或更新官方内核'
-    option 8 '自定义规则与备用端口'
-    option 9 '查看全部命令'
-    option 10 '安装或卸载 duo 快捷命令'
-    option 11 '五协议部署与分享'
+    home_banner
+    option 1 '服务状态'
+    option 2 '安装与部署'
+    option 3 '客户端与订阅'
+    option 4 '网络与防火墙'
+    option 5 '系统工具'
+    option 0 '退出'
+    printf '%s\n' '────────────────────────────────────'
+    vps_summary
     read -r -p '请选择 [回车默认 1，0 退出]：' selection </dev/tty || exit 1
     case "${selection:-1}" in
         1) duo status || true ;;
-        2) client_menu ;;
-        3) firewall_menu ;;
-        4) setup || printf '%s\n' '安装未完成，请查看上面的报错。' ;;
-        5)
-            read -r -p '请输入站点域名（0 返回）：' domain </dev/tty || exit 1
-            [[ "$domain" == 0 ]] || deploy_when_ready "$domain" || true ;;
-        6)
-            read -r -p '两条线路已在客户端验收通过？[y/N] ' answer </dev/tty || exit 1
-            if [[ "$answer" == y || "$answer" == Y ]]; then
-                systemctl is-active --quiet sing-box-reality &&
-                    systemctl is-active --quiet sing-box-hy2 &&
-                    systemctl enable sing-box-reality sing-box-hy2 || echo '请先确认主备都在运行。'
-            fi ;;
-        7) core_menu ;;
-        8) custom_menu ;;
-        9) duo --help ;;
-        10) shortcut_menu ;;
-        11) five_menu ;;
+        2) deploy_menu ;;
+        3) client_menu ;;
+        4) network_menu ;;
+        5) tools_menu ;;
         0) exit 0 ;;
         *) printf '%s\n' '无效选项。' >&2 ;;
     esac

@@ -10,7 +10,7 @@
 f=$(mktemp) && curl -4 -fSL --connect-timeout 8 --max-time 25 https://raw.githubusercontent.com/LauritzWu/lauritz-duo/main/bootstrap.sh -o "$f" && bash "$f"; r=$?; if [ -n "$f" ]; then rm -f -- "$f"; fi; (exit "$r")
 ```
 
-菜单支持数字选择、回车默认及 0 返回。选 2 导出客户端配置并查看验收步骤，选 3 检查端口或向现有 UFW 放行必要端口，选 7 查看或更新官方 APT 稳定版。进入菜单时只下载程序和模板。管理操作从菜单选择后执行。新 VPS 选 4 引导安装、签发证书并部署主备。若证书等待超时，修好 DNS 或 TCP 80 后选 5 续跑。
+首页分为服务状态、安装与部署、客户端与订阅、网络与防火墙、系统工具。支持数字选择、回车默认和子菜单按 0 返回。底部显示系统、接口地址和服务状态。服务器地区可在 5 → 3 手动保存，不会请求第三方地理定位。
 
 ## 已搭好主备的 VPS
 
@@ -34,12 +34,12 @@ publish 使用随附的无凭据模板，从现有 /etc/sing-box-reality 和 /et
 
 ## 五协议预览
 
-主菜单 11 创建独立的五协议服务。需提前完成同机 Caddy 证书签发，并使用支持这五种协议的内核。现有双协议服务仍可单独管理。
+2 → 3 → 1 创建独立的五协议服务。需提前完成同机 Caddy 证书签发，并使用支持这五种协议的内核。现有双协议服务仍可单独管理。
 
 - 协议为 REALITY、VMess WS + TLS、Hysteria 2、TUIC 和 AnyTLS。可随机选端口，也可指定五个端口。随机检查本机监听，云防火墙还需单独放行。UUID 可生成或指定，三种密码型协议各自生成密码。
-- 11 → 2 显示五条链接和二维码。二维码使用本机 qrencode，可从 2 → 5 安装。11 → 3 发布六份 sing-box JSON 和六份 Base64 链接订阅，含单节点和聚合版本。订阅要求 HTTPS Basic Auth。聚合二维码指向订阅地址，导入时还需输入凭据。
-- 主菜单 3 可按 TCP/UDP 放行指定端口或范围；全开只对已启用的本机 UFW 生效，需手动输入 OPEN-ALL 确认。回退可用 ufw status numbered 找到 Lauritz Duo open all 规则，再用 ufw delete 编号移除。
-- 主菜单 7 支持官方 APT 候选版本或指定仓库版本。旧版可能无法加载含 AnyTLS 的配置，升级或降级后先校验配置，再逐个重启服务。
+- 2 → 3 → 2 显示五条链接和二维码。二维码使用本机 qrencode，可从 3 → 5 安装。2 → 3 → 3 发布六份 sing-box JSON 和六份 Base64 链接订阅，含单节点和聚合版本。订阅要求 HTTPS Basic Auth。聚合二维码指向订阅地址，导入时还需输入凭据。
+- 4 → 1 可按 TCP/UDP 放行指定端口或范围；全开只对已启用的本机 UFW 生效，需手动输入 OPEN-ALL 确认。回退可用 ufw status numbered 找到 Lauritz Duo open all 规则，再用 ufw delete 编号移除。
+- 5 → 1 支持官方 APT 候选版本或指定仓库版本。旧版可能无法加载含 AnyTLS 的配置，升级或降级后先校验配置，再逐个重启服务。
 
 测试凭据下，五协议服务端配置及六份客户端 JSON 已通过 sing-box 检查，订阅内容已验证可解码。实际 VPS 部署、公开端口、认证订阅和各客户端连通需单独验收。
 
