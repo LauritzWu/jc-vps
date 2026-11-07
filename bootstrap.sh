@@ -18,7 +18,7 @@ for file in manager.sh client-template.json; do
     curl -4 -fsSL --retry 2 --connect-timeout 8 --max-time 25 "$source_url/$file" -o "$dir/$file"
 done
 (cd "$dir" && sha256sum -c <<'SHA256'
-2d7fa541d10177d67a3351060a7ff06397bf848d6abbba9b0b2bd6fd5a4e389c  manager.sh
+2e27cc57fd8ba5c5889bb95ecdde43fd50a38a44a7738b5c560937b6453b2b8e  manager.sh
 d96d8e1440c7b53ef47625820c77fe58c95a4ff0cef1f989d68c53ff099a7d7b  client-template.json
 SHA256
 )
@@ -321,14 +321,14 @@ custom_menu() {
 }
 
 install_shortcut() {
-    local target=/usr/local/bin/duo temp
+    local target=/usr/local/bin/jc temp
     if [[ -e "$target" || -L "$target" ]]; then
         if [[ -f "$target" && ! -L "$target" && -x "$target" ]] &&
             grep -qxF -e '# Managed by JC' -e '# Managed by Lauritz Duo' "$target"; then
-            echo 'duo 快捷命令已安装。'
+            echo 'jc 快捷命令已安装。'
             return 0
         fi
-        echo '发现其他程序使用 /usr/local/bin/duo，保留原文件。' >&2
+        echo '发现其他程序使用 /usr/local/bin/jc，保留原文件。' >&2
         return 1
     fi
     temp=$(mktemp) || return 1
@@ -346,7 +346,7 @@ DUOSH
         return 1
     fi
     rm -f -- "$temp"
-    echo 'duo 快捷命令已安装。'
+    echo 'jc 快捷命令已安装。'
 }
 
 init_tools() {
@@ -363,11 +363,11 @@ init_tools() {
 }
 
 shortcut_menu() {
-    local target=/usr/local/bin/duo
+    local target=/usr/local/bin/jc
     while true; do
         heading '管理 JC 快捷命令'
-        option 1 '安装 duo 快捷命令'
-        option 2 '卸载 duo 快捷命令（主备服务继续运行）'
+        option 1 '安装 jc 快捷命令'
+        option 2 '卸载 jc 快捷命令（节点服务继续运行）'
         choose 1
         case "$selection" in
             0) return ;;
@@ -377,7 +377,7 @@ shortcut_menu() {
                     echo '未发现由 JC 安装的快捷命令。'
                     continue
                 fi
-                read -r -p '卸载 duo 快捷命令？[Y/N] ' answer </dev/tty || return
+                read -r -p '卸载 jc 快捷命令？[Y/N] ' answer </dev/tty || return
                 if [[ "$answer" == y || "$answer" == Y ]]; then
                     rm -f -- "$target" && echo '快捷命令已卸载。'
                 fi ;;
@@ -512,7 +512,7 @@ tools_menu() {
     while true; do
         heading '系统工具'
         option 1 '查看或更新官方内核'
-        option 2 '安装或卸载 duo 快捷命令'
+        option 2 '安装或卸载 jc 快捷命令'
         option 3 '手动覆盖服务器地区'
         option 4 '查看全部命令'
         option 5 '补齐快捷命令和基础组件'

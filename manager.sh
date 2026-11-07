@@ -109,7 +109,7 @@ APT
 }
 uninstall() {
     local state service pid answer package processes fragment kind ext
-    local shortcut=/usr/local/bin/duo region config_home="${XDG_CONFIG_HOME:-$HOME/.config}"
+    local shortcut region config_home="${XDG_CONFIG_HOME:-$HOME/.config}"
     local managed=() owned_pids=() files=() dirs=()
     package=$(dpkg-query -W -f='${Status}' sing-box 2>/dev/null) || package=''
     for service in sing-box-hy2-hopping "$five" "$hy2" "$real"; do
@@ -147,9 +147,12 @@ uninstall() {
     for region in "$config_home/jc" "$config_home/lauritz-duo"; do
         if [[ -d $region && ! -L $region ]]; then files+=("$region/region" "$region/region.auto"); fi
     done
-    if [[ -f $shortcut && ! -L $shortcut ]] && grep -qxF -e '# Managed by JC' -e '# Managed by Lauritz Duo' "$shortcut"; then
-        files+=("$shortcut")
-    fi
+    for shortcut in /usr/local/bin/jc /usr/local/bin/duo; do
+        if [[ -f $shortcut && ! -L $shortcut ]] &&
+           grep -qxF -e '# Managed by JC' -e '# Managed by Lauritz Duo' "$shortcut"; then
+            files+=("$shortcut")
+        fi
+    done
     if (( ${#managed[@]} )); then
         printf '将停止并取消开机启动的服务\n'
         printf '  %s\n' "${managed[@]}"
