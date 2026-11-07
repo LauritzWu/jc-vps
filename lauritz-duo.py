@@ -14,7 +14,6 @@ import subprocess
 import sys
 import tempfile
 import time
-import urllib.request
 import uuid
 
 CORE = Path("/usr/bin/sing-box")
@@ -86,18 +85,24 @@ def domain_name(value):
 def install_packages():
     if Path("/etc/systemd/system/sing-box.service").exists() and not CORE.exists():
         raise ValueError("发现旧同名服务，先完成迁移或在干净 VPS 上安装")
-    run("apt-get", "update")
-    run("apt-get", "install", "-y", "ca-certificates", "curl", "caddy")
+    if not all(shutil.which(name) for name in ("caddy", "curl")):
+        run("apt-get", "update")
+        run("apt-get", "install", "-y", "ca-certificates", "curl", "caddy")
     key = Path("/etc/apt/keyrings/sagernet.asc")
     key.parent.mkdir(exist_ok=True)
-    with urllib.request.urlopen("https://sing-box.app/gpg.key", timeout=20) as reply:
-        data = reply.read()
-    if not data.startswith(b"-----BEGIN PGP PUBLIC KEY BLOCK-----"):
-        raise ValueError("官方软件源密钥格式异常")
+    if not key.exists():
+        print("正在通过 IPv4 下载 SagerNet APT 签名密钥…", flush=True)
+        try:
+            data = run("curl", "-4", "-fsSL", "--retry", "2", "--retry-all-errors",
+                       "--connect-timeout", "8", "--max-time", "15", "--retry-max-time", "35",
+                       "https://sing-box.app/gpg.key", capture=True).encode()
+        except subprocess.CalledProcessError:
+            raise ValueError("SagerNet 签名密钥下载失败，检查 VPS 到 sing-box.app 的 HTTPS 连接。") from None
+        if not data.startswith(b"-----BEGIN PGP PUBLIC KEY BLOCK-----"):
+            raise ValueError("官方软件源密钥格式异常")
+        write(key, data, 0o644)
     source = Path("/etc/apt/sources.list.d/sagernet.sources")
     apt_source = b"Types: deb\nURIs: https://deb.sagernet.org/\nSuites: *\nComponents: *\nSigned-By: /etc/apt/keyrings/sagernet.asc\n"
-    if not key.exists():
-        write(key, data, 0o644)
     if not source.exists():
         write(source, apt_source, 0o644)
     run("apt-get", "-o", "Acquire::ForceIPv4=true", "update")

@@ -10,13 +10,17 @@ for dependency in curl python3; do
 done
 
 printf '%s\n' '正在下载 Lauritz Duo 程序与模板…'
-source_url='https://raw.githubusercontent.com/LauritzWu/lauritz-duo/5134849d01497a877cb951295c737d733aeda818'
+source_url='https://raw.githubusercontent.com/LauritzWu/lauritz-duo/main'
 dir=$(mktemp -d)
 trap 'rm -f "$dir/lauritz-duo.py" "$dir/client-template.json"; rmdir "$dir"' EXIT
 for file in lauritz-duo.py client-template.json; do
-    curl -4 -fsSL --connect-timeout 8 --max-time 25 "$source_url/$file" -o "$dir/$file"
+    curl -4 -fsSL --retry 2 --connect-timeout 8 --max-time 25 "$source_url/$file" -o "$dir/$file"
 done
-
+(cd "$dir" && sha256sum -c <<'SHA256'
+947cd1930e3a8b8235dc48f4e20224080cf190fa2fc85dbf1df3f0b84afbe964  lauritz-duo.py
+d96d8e1440c7b53ef47625820c77fe58c95a4ff0cef1f989d68c53ff099a7d7b  client-template.json
+SHA256
+)
 
 duo() {
     python3 "$dir/lauritz-duo.py" "$@" </dev/tty
