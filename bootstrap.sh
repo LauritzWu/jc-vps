@@ -18,7 +18,7 @@ for file in manager.sh client-template.json; do
     curl -4 -fsSL --retry 2 --connect-timeout 8 --max-time 25 "$source_url/$file" -o "$dir/$file"
 done
 (cd "$dir" && sha256sum -c <<'SHA256'
-9656067b15800237ae05527d52e0240ebbe122afdec91a27bddec05a2dd2508b  manager.sh
+5f02c386922f324ae8fde55eaa24a9ccbb2499ac8a366688e3814f642835cedc  manager.sh
 d96d8e1440c7b53ef47625820c77fe58c95a4ff0cef1f989d68c53ff099a7d7b  client-template.json
 SHA256
 )
@@ -27,48 +27,99 @@ duo() {
     bash "$dir/manager.sh" "$@" </dev/tty
 }
 
-setup() {
-    local domain answer
-    read -r -p '请输入已解析到 VPS 的域名（0 返回）：' domain </dev/tty || return 1
-    [[ "$domain" == 0 ]] && return 0
-    if [[ ! "$domain" =~ ^[a-z0-9][a-z0-9.-]*\.[a-z][a-z0-9-]*$ ]]; then
-        printf '%s\n' '请输入有效的小写域名。' >&2
-        return 1
-    fi
-    printf '%s\n' '需要公网 TCP 80 用于签发证书，TCP/UDP 443 用于主备连接。'
-    read -r -p '开始安装并配置站点？[y/N] ' answer </dev/tty || return 1
-    [[ "$answer" == y || "$answer" == Y ]] || return 0
-    duo packages || return 1
-    duo site "$domain" || return 1
-    deploy_when_ready "$domain"
+pause_menu() {
+    read -r -p '按回车返回菜单：' </dev/tty || true
 }
 
-quick_install() {
-    local answer
-    if [[ -f /etc/sing-box-reality/config.json && -f /etc/sing-box-hy2/config.json ]]; then
-        read -r -p '检测到主备配置，安装官方软件包并启动现有主备？[y/N] ' answer </dev/tty || return 1
-        [[ "$answer" == y || "$answer" == Y ]] || return 0
-        duo packages && systemctl start sing-box-reality sing-box-hy2
-    else
-        setup
-    fi
-}
-
-deploy_when_ready() {
+wait_for_certificate() {
     local domain=$1 attempt
-    printf '%s\n' '正在等待 Caddy 证书，最多约 90 秒…'
+    echo '正在等待 Caddy 公信证书（最多约 90 秒）…'
     for ((attempt=1; attempt<=15; attempt++)); do
         if curl -fs --noproxy '*' --max-time 3 \
             --resolve "$domain:8443:127.0.0.1" "https://$domain:8443/" -o /dev/null; then
-            duo deploy "$domain"
-            return $?
+            return 0
         fi
-        sleep 3
+        if (( attempt < 15 )); then sleep 3; fi
     done
-    printf '%s\n' '证书暂未就绪。检查 DNS 和公网 TCP 80，查看 journalctl -u caddy -n 30 --no-pager。修好后在「安装与部署」选 2 续跑。' >&2
+    echo '证书暂未就绪。检查 DNS 和公网 TCP 80，查看 journalctl -u caddy -n 30 --no-pager，然后重新选择 6。' >&2
     return 1
 }
 
+quick_install() {
+    local domain ip ports='' uuid version='' answer detected
+    local selection
+    if [[ -e /etc/sing-box-lauritz-five/config.json || -e /etc/systemd/system/sing-box-lauritz-five.service ]]; then
+        echo '已检测到五协议配置。请到 2 管理服务，或到 3 查看节点与订阅。'
+        return 0
+    fi
+
+    heading '一键安装 sing-box · 五协议'
+    printf '%s\n' 'REALITY / VMess WS + TLS / Hysteria 2 / TUIC / AnyTLS' \
+        '请将域名直接解析到 VPS，并在云防火墙放行 TCP 80 供 Caddy 签发或续期。' \
+        '已有主备服务可继续运行。新五协议使用另外分配的端口。'
+    heading '1/5  官方内核'
+    option 1 '使用已安装的官方内核；新机安装 APT 稳定版'
+    option 2 '指定官方 APT 版本（升级或降级）'
+    choose 1
+    case "$selection" in
+        0) return 0 ;;
+        1) ;;
+        2)
+            apt-cache madison sing-box || true
+            read -r -p '完整 APT 版本号（0 返回）：' version </dev/tty || return 1
+            [[ $version != 0 ]] || return 0
+            [[ $version =~ ^[0-9][0-9A-Za-z.+:~\-]*$ ]] || { echo '版本号格式无效。'; return 1; } ;;
+        *) echo '无效选项。'; return 1 ;;
+    esac
+    heading '2/5  域名和证书'
+    detected=$(jq -r '.inbounds[0].tls.server_name // empty' /etc/sing-box-reality/config.json 2>/dev/null || true)
+    read -r -p "站点域名${detected:+ [回车使用 $detected]}（0 返回）：" domain </dev/tty || return 1
+    [[ $domain != 0 ]] || return 0
+    domain=${domain:-$detected}
+    [[ $domain =~ ^[a-z0-9][a-z0-9.-]*\.[a-z][a-z0-9-]*$ ]] || { echo '请输入有效的小写域名。'; return 1; }
+    read -r -p 'VPS 公网 IPv4（0 返回）：' ip </dev/tty || return 1
+    [[ $ip != 0 ]] || return 0
+    duo validate-install "$domain" "$ip" || return 1
+
+    heading '3/5  五协议端口'
+    option 1 '自动选择五个可用端口'
+    option 2 '手动指定五个端口'
+    choose 1
+    case "$selection" in
+        0) return 0 ;;
+        1) ;;
+        2)
+            read -r -p '依次输入 REALITY,VMess,HY2,TUIC,AnyTLS 端口，用英文逗号隔开（0 返回）：' ports </dev/tty || return 1
+            [[ $ports != 0 ]] || return 0
+            [[ $ports =~ ^[1-9][0-9]{0,4}(,[1-9][0-9]{0,4}){4}$ ]] || { echo '请输入五个有效端口。'; return 1; } ;;
+        *) echo '无效选项。'; return 1 ;;
+    esac
+    heading '4/5  节点凭据'
+    read -r -p 'UUID（回车自动生成，0 返回）：' uuid </dev/tty || return 1
+    [[ $uuid != 0 ]] || return 0
+    duo validate-install "$domain" "$ip" "$ports" "$uuid" || return 1
+    heading '5/5  确认安装'
+    printf '域名 %s · IPv4 %s · 端口 %s\n' "$domain" "$ip" "${ports:-自动选择}"
+    echo '安装后按输出放行各节点端口，再进行客户端验收。'
+    read -r -p '开始安装？[y/N] ' answer </dev/tty || return 1
+    [[ $answer == y || $answer == Y ]] || return 0
+    if [[ -n $version ]]; then
+        duo packages --version "$version" || return 1
+    elif [[ ! -x /usr/bin/sing-box ]] || ! command -v caddy >/dev/null; then
+        duo packages || return 1
+    fi
+    if ! curl -fs --noproxy '*' --max-time 3 --resolve "$domain:8443:127.0.0.1" \
+        "https://$domain:8443/" -o /dev/null; then
+        duo site "$domain" && wait_for_certificate "$domain" || return 1
+    fi
+    duo five "$domain" "$ip" --ports "$ports" --uuid "$uuid" || return 1
+    heading '五协议安装成功 · 本机监听已确认'
+    echo '请在云防火墙放行上面列出的 TCP/UDP 端口。外网验收通过后，在主菜单 2 启用开机启动。'
+    option 1 '查看五条节点链接和二维码（含凭据）'
+    option 2 '稍后在客户端与订阅菜单查看'
+    choose 2
+    if [[ $selection == 1 ]]; then duo five-share || return 1; fi
+}
 
 if [[ -t 1 && "${TERM:-dumb}" != dumb && -z "${NO_COLOR:-}" ]]; then
     accent=$'\033[1;36m'; green=$'\033[1;32m'; reset=$'\033[0m'
@@ -107,7 +158,11 @@ client_menu() {
         option 3 '发布或更新 HTTPS 订阅'
         option 4 '查看客户端验收步骤'
         option 5 '安装终端二维码工具 qrencode'
-        choose 4
+        option 6 '查看五协议节点链接和二维码'
+        option 7 '发布五协议单节点及聚合订阅'
+        local default_option=4
+        if [[ -s /etc/sing-box-lauritz-five/profiles/links.txt ]]; then default_option=6; fi
+        choose "$default_option"
         case "$selection" in
             0) return ;;
             1) node_links || echo '请先部署主备并确认配置文件存在。' ;;
@@ -127,6 +182,8 @@ client_menu() {
                 if [[ "$answer" == y || "$answer" == Y ]]; then
                     apt-get install -y qrencode || true
                 fi ;;
+            6) duo five-share || echo '请先完成五协议安装。' ;;
+            7) duo five-share --publish || echo '发布未完成，请检查上方信息。' ;;
             *) echo '无效选项。' ;;
         esac
     done
@@ -290,42 +347,6 @@ shortcut_menu() {
 }
 
 
-five_menu() {
-    local domain ip mode ports id
-    while true; do
-        heading '五协议部署与分享'
-        option 1 '创建独立的五协议服务'
-        option 2 '显示五条节点链接及独立二维码'
-        option 3 '发布单节点与聚合 HTTPS 订阅'
-        choose 2
-        case "$selection" in
-            0) return ;;
-            1)
-                read -r -p '站点域名（已签发证书，0 返回）：' domain </dev/tty || return
-                [[ "$domain" == 0 ]] && continue
-                read -r -p 'VPS 公网 IPv4（0 返回）：' ip </dev/tty || return
-                [[ "$ip" == 0 ]] && continue
-                option 1 '随机选五个未被监听的端口'
-                option 2 '按 REALITY,VMess,HY2,TUIC,AnyTLS 指定五个端口'
-                choose 1
-                mode=$selection; ports=''
-                case "$mode" in
-                    0) continue ;;
-                    1) ;;
-                    2) read -r -p '五个端口，用英文逗号隔开（0 返回）：' ports </dev/tty || return
-                       [[ "$ports" == 0 || -z "$ports" ]] && continue ;;
-                    *) continue ;;
-                esac
-                read -r -p 'UUID（回车自动生成，0 返回）：' id </dev/tty || return
-                [[ "$id" == 0 ]] && continue
-                duo five "$domain" "$ip" --ports "$ports" --uuid "$id" || true ;;
-            2) duo five-share || true ;;
-            3) duo five-share --publish || true ;;
-            *) echo '无效选项。' ;;
-        esac
-    done
-}
-
 region_file="${XDG_CONFIG_HOME:-$HOME/.config}/lauritz-duo/region"
 
 set_region() {
@@ -397,28 +418,30 @@ vps_summary() {
     printf ' 地区  %s\n 服务  %s\n' "${region:-未能识别（系统工具可手动覆盖）}" "$active"
 }
 
-deploy_menu() {
-    local domain answer
+service_menu() {
+    local selection answer
     while true; do
-        heading '安装与部署'
-        option 1 '新 VPS：引导安装主备'
-        option 2 '继续部署（网站已配置）'
-        option 3 '五协议部署与分享'
-        option 4 '主备开机启动（客户端验收后）'
+        heading '服务管理'
+        option 1 '启动或恢复五协议服务'
+        option 2 '五协议设为开机启动（客户端验收后）'
+        option 3 '启动已有 REALITY / HY2 主备'
+        option 4 '已有主备设为开机启动（客户端验收后）'
         choose 1
         case "$selection" in
             0) return ;;
-            1) setup || echo '安装未完成，请查看上面的报错。' ;;
-            2)
-                read -r -p '请输入站点域名（0 返回）：' domain </dev/tty || return
-                [[ "$domain" == 0 ]] || deploy_when_ready "$domain" || true ;;
-            3) five_menu ;;
-            4)
-                read -r -p '两条线路已通过客户端验收？[y/N] ' answer </dev/tty || return
-                if [[ "$answer" == y || "$answer" == Y ]]; then
-                    systemctl is-active --quiet sing-box-reality &&
-                        systemctl is-active --quiet sing-box-hy2 &&
-                        systemctl enable sing-box-reality sing-box-hy2 || echo '请先确认主备都在运行。'
+            1) systemctl start sing-box-lauritz-five && echo '五协议服务已启动。' ;;
+            3) systemctl start sing-box-reality sing-box-hy2 && echo '现有主备已启动。' ;;
+            2|4)
+                local services=(sing-box-lauritz-five)
+                if [[ $selection == 4 ]]; then services=(sing-box-reality sing-box-hy2); fi
+                read -r -p '客户端验收已经通过？[y/N] ' answer </dev/tty || return
+                if [[ $answer == y || $answer == Y ]]; then
+                    local service ready=1
+                    for service in "${services[@]}"; do
+                        systemctl is-active --quiet "$service" || ready=0
+                    done
+                    if (( ready )); then systemctl enable "${services[@]}" || true
+                    else echo '请先启动服务并完成外网验收。'; fi
                 fi ;;
             *) echo '无效选项。' ;;
         esac
@@ -520,7 +543,7 @@ while true; do
     home_banner "$width"
     heading '管理菜单'
     option 1 '服务状态'
-    option 2 '安装与部署'
+    option 2 '服务管理'
     option 3 '客户端与订阅'
     option 4 '网络与防火墙'
     option 5 '系统工具'
@@ -533,11 +556,13 @@ while true; do
     read -r -p '请选择 [回车默认 1，0 退出]：' selection </dev/tty || exit 1
     case "${selection:-1}" in
         1) duo status || true ;;
-        2) deploy_menu ;;
+        2) service_menu ;;
         3) client_menu ;;
         4) network_menu ;;
         5) tools_menu ;;
-        6) quick_install || echo '安装未完成，请查看上面的报错。' ;;
+        6)
+            quick_install || echo '安装未完成，请查看上面的报错。'
+            pause_menu ;;
         7) if duo uninstall; then exit 0; fi ;;
         0) exit 0 ;;
         *) printf '%s\n' '无效选项。' >&2 ;;

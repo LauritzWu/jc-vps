@@ -620,7 +620,9 @@ five_deploy() {
     started+=("$five")
     systemctl start "$five"
     socket_ready "$five" "${listeners[@]}" || fail '未确认五个端口均由新服务监听'
-    printf '已监听 %s\n' "${listeners[@]}"
+    for i in "${!kinds[@]}"; do
+        printf '已监听 %-8s %s\n' "${kinds[i]}" "${listeners[i]}"
+    done
     printf '客户端配置与分享链接位于 %s\n' "$dir"
 }
 
@@ -630,10 +632,14 @@ show_qr() {
 }
 
 five_share() {
-    local domain hash auth dir="/etc/$five/profiles" prefix=/profiles/five
+    local domain hash auth port url dir="/etc/$five/profiles" prefix=/profiles/five
     local i=0 link label ext
     domain=$(jq -er '.inbounds[0].tls.server_name' "$(cfg "$five")")
     valid_domain "$domain"
+    port=$(jq -er '.inbounds[0].listen_port' "$(cfg "$five")")
+    port_number "$port" || fail 'REALITY 端口无效'
+    url="https://$domain"
+    if [[ $port != 443 ]]; then url+=":$port"; fi
     if [[ ${1:-} == --publish ]]; then
         if ! grep -Fq "handle_path $prefix/*" "$caddyfile"; then
             [[ $(grep -cxF "$domain:8443 {" "$caddyfile") == 1 ]] || fail '未找到唯一的 8443 站点'
@@ -672,7 +678,7 @@ CADDY
         printf '\n[%s]\n' "$label"
         show_qr "$link"
         if [[ ${1:-} == --publish ]]; then
-            printf '订阅 https://%s%s/%s.sub\nsing-box https://%s%s/%s.json\n' "$domain" "$prefix" "$label" "$domain" "$prefix" "$label"
+            printf '订阅 %s%s/%s.sub\nsing-box %s%s/%s.json\n' "$url" "$prefix" "$label" "$url" "$prefix" "$label"
         fi
         i=$((i+1))
     done <"$dir/links.txt"
@@ -680,8 +686,8 @@ CADDY
     cat "$dir/links.txt"
     if [[ ${1:-} == --publish ]]; then
         printf '\n聚合订阅，用户名 lax\n'
-        show_qr "https://$domain$prefix/all.sub"
-        printf '聚合 sing-box JSON https://%s%s/all.json\n' "$domain" "$prefix"
+        show_qr "$url$prefix/all.sub"
+        printf '聚合 sing-box JSON %s%s/all.json\n' "$url" "$prefix"
     fi
 }
 
@@ -714,6 +720,22 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 case "$command_name" in
+    validate-install)
+        [[ $# -ge 2 && $# -le 4 ]] || fail '缺少域名或公网 IPv4'
+        valid_domain "$1"
+        valid_ip "$2"
+        if [[ -n ${3:-} ]]; then
+            [[ $3 =~ ^[1-9][0-9]{0,4}(,[1-9][0-9]{0,4}){4}$ ]] || fail '请输入五个端口'
+            IFS=, read -ra requested_ports <<<"$3"
+            used=' '
+            for port in "${requested_ports[@]}"; do
+                port_number "$port" && [[ $used != *" $port "* ]] || fail '端口无效或重复'
+                used+="$port "
+            done
+        fi
+        if [[ -n ${4:-} ]]; then
+            [[ $4 =~ ^[a-fA-F0-9]{8}(-[a-fA-F0-9]{4}){3}-[a-fA-F0-9]{12}$ ]] || fail 'UUID 格式无效'
+        fi ;;
     packages) packages "$@";;
     uninstall) [[ $# == 0 ]] || fail '用法 uninstall'; uninstall;;
     site) [[ $# == 1 ]] || fail '用法 site DOMAIN'; site "$1";;
@@ -722,7 +744,7 @@ case "$command_name" in
         deploy "$@";;
     status)
         [[ $# -le 1 ]] || fail '用法 status [DOMAIN]'
-        systemctl --no-pager show "$real" "$hy2" caddy -p Id -p ActiveState -p UnitFileState -p ExecStart || true
+        systemctl --no-pager show "$real" "$hy2" "$five" caddy -p Id -p ActiveState -p UnitFileState -p ExecStart || true
         ss -lntup '( sport = :22 or sport = :80 or sport = :443 or sport = :8443 )'
         ip -6 addr show scope global
         if (( $# )); then valid_domain "$1"; getent ahosts "$1"; site_curl "$1" / -fsS; printf '\n'; fi;;
