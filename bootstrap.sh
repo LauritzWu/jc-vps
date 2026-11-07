@@ -28,7 +28,8 @@ duo() {
 
 setup() {
     local domain answer
-    read -r -p '请输入已解析到 VPS 的域名：' domain </dev/tty || return 1
+    read -r -p '请输入已解析到 VPS 的域名（0 返回）：' domain </dev/tty || return 1
+    [[ "$domain" == 0 ]] && return 0
     if [[ ! "$domain" =~ ^[a-z0-9][a-z0-9.-]*\.[a-z][a-z0-9-]*$ ]]; then
         printf '%s\n' '请输入有效的小写域名。' >&2
         return 1
@@ -45,7 +46,7 @@ deploy_when_ready() {
     local domain=$1 attempt
     printf '%s\n' '正在等待 Caddy 证书，最多约 90 秒…'
     for ((attempt=1; attempt<=15; attempt++)); do
-        if curl -fsS --noproxy '*' --max-time 3 \
+        if curl -fs --noproxy '*' --max-time 3 \
             --resolve "$domain:8443:127.0.0.1" "https://$domain:8443/" -o /dev/null; then
             duo deploy "$domain"
             return $?
@@ -56,23 +57,167 @@ deploy_when_ready() {
     return 1
 }
 
+
+if [[ -t 1 && "${TERM:-dumb}" != dumb && -z "${NO_COLOR:-}" ]]; then
+    accent=$'\033[1;36m'; green=$'\033[1;32m'; reset=$'\033[0m'
+else
+    accent=''; green=''; reset=''
+fi
+
+heading() { printf '\n%s%s%s\n' "$accent" "$1" "$reset"; }
+option() { printf ' %s%s.%s %s\n' "$green" "$1" "$reset" "$2"; }
+choose() {
+    read -r -p "请选择 [默认 $1，0 返回]：" selection </dev/tty || exit 1
+    selection=${selection:-$1}
+}
+
+node_links() {
+    python3 - <<'PYLINKS'
+import json
+from pathlib import Path
+from urllib.parse import urlencode, quote
+
+real_dir = Path("/etc/sing-box-reality")
+real = json.loads((real_dir / "config.json").read_text())["inbounds"][0]
+tls = real["tls"]
+saved = dict(line.split("=", 1) for line in (real_dir / "client.txt").read_text().splitlines())
+domain = tls["server_name"]
+query = urlencode(dict(encryption="none", security="reality", sni=domain, fp="chrome",
+                       pbk=saved["Public key"], sid=tls["reality"]["short_id"][0],
+                       type="tcp", flow=real["users"][0]["flow"]))
+hy2 = json.loads(Path("/etc/sing-box-hy2/config.json").read_text())["inbounds"][0]
+print("复制以下链接到客户端。链接含凭据，请勿截图或转发。")
+print(f'vless://{real["users"][0]["uuid"]}@{domain}:{real["listen_port"]}?{query}#Lauritz-Duo-REALITY')
+print(f'hysteria2://{quote(hy2["users"][0]["password"], safe="")}@{domain}:{hy2["listen_port"]}/?'
+      + urlencode(dict(sni=domain, insecure="0")) + "#Lauritz-Duo-HY2")
+PYLINKS
+}
+
+client_menu() {
+    while true; do
+        heading '客户端配置与验收'
+        option 1 '显示 v2rayN 导入链接'
+        option 2 '导出 sing-box JSON（固定 IPv4）'
+        option 3 '发布或更新 HTTPS 订阅'
+        option 4 '查看客户端验收步骤'
+        choose 4
+        case "$selection" in
+            0) return ;;
+            1) node_links || echo '请先部署主备并确认配置文件存在。' ;;
+            2|3)
+                read -r -p '请输入 VPS 公网 IPv4（0 返回）：' ip </dev/tty || return
+                [[ "$ip" == 0 ]] && continue
+                if [[ "$selection" == 2 ]]; then
+                    duo export "$ip" "$HOME/lauritz-duo-client-$(date +%s).json" || true
+                else
+                    duo publish "$ip" || true
+                fi ;;
+            4) printf '%s\n' '在 v2rayN 从剪贴板导入两条链接，或把导出的 JSON 导入 sing-box。' \
+                   '逐条选中节点并打开境外网页，再查询出口 IPv4。两条都应显示 VPS 的公网 IPv4。' \
+                   '实测通过后，在主菜单选择 6 设置主备开机启动。' ;;
+            *) echo '无效选项。' ;;
+        esac
+    done
+}
+
+firewall_menu() {
+    while true; do
+        heading '本机与云防火墙'
+        option 1 '查看本机监听和 UFW 状态'
+        option 2 '向已启用的 UFW 添加 TCP 80/443、UDP 443'
+        choose 1
+        case "$selection" in
+            0) return ;;
+            1)
+                ss -lntup '( sport = :22 or sport = :80 or sport = :443 or sport = :8443 )' || true
+                if command -v ufw >/dev/null; then LC_ALL=C ufw status verbose || true; fi
+                echo '云防火墙请在服务商后台放行相同端口。' ;;
+            2)
+                if ! command -v ufw >/dev/null || ! LC_ALL=C ufw status | grep -q '^Status: active'; then
+                    echo '未发现正在运行的 UFW。请按实际防火墙和云平台配置处理。'
+                    continue
+                fi
+                read -r -p '添加三条入站规则？[y/N] ' answer </dev/tty || return
+                if [[ "$answer" == y || "$answer" == Y ]]; then
+                    ufw allow 80/tcp && ufw allow 443/tcp && ufw allow 443/udp && LC_ALL=C ufw status || true
+                fi ;;
+            *) echo '无效选项。' ;;
+        esac
+    done
+}
+
+core_menu() {
+    while true; do
+        heading '官方 sing-box 内核'
+        option 1 '刷新并查看已安装版本和 APT 候选版本'
+        option 2 '安装或升级官方稳定版'
+        choose 1
+        case "$selection" in
+            0) return ;;
+            1) apt-get -o Acquire::ForceIPv4=true update && apt-cache policy sing-box || true ;;
+            2)
+                read -r -p '安装或升级 APT 稳定版？[y/N] ' answer </dev/tty || return
+                if [[ "$answer" == y || "$answer" == Y ]]; then
+                    duo packages || true
+                    echo '已有服务请在备用线路可用时分别重启并复测，以加载新程序。'
+                fi ;;
+            *) echo '无效选项。' ;;
+        esac
+    done
+}
+
+custom_menu() {
+    while true; do
+        heading '自定义规则与备用端口'
+        option 1 '为 Hysteria 2 更新国内目的地拒绝规则'
+        option 2 '为 REALITY 更新国内目的地拒绝规则'
+        option 3 '设置 Hysteria 2 UDP 跳跃范围'
+        choose 1
+        case "$selection" in
+            0) return ;;
+            1|2)
+                service=sing-box-hy2
+                [[ "$selection" == 2 ]] && service=sing-box-reality
+                read -r -p "短暂重启 $service，请确认 SSH 走另一条线路 [y/N]：" answer </dev/tty || return
+                if [[ "$answer" == y || "$answer" == Y ]]; then duo rules "$service" || true; fi ;;
+            3)
+                read -r -p '输入 UDP 起止端口，用空格分隔（0 返回）：' first last </dev/tty || return
+                [[ "$first" == 0 ]] || duo hopping "$first" "$last" || true ;;
+            *) echo '无效选项。' ;;
+        esac
+    done
+}
+
 while true; do
-    printf '\n%s\n' 'Lauritz Duo 预览版' \
-        '1. 检查现有服务' '2. 发布或更新 HTTPS 订阅' '3. 查看全部命令' \
-        '4. 新 VPS：引导安装主备' '5. 继续部署（网站已配置）' '0. 退出'
-    read -r -p '请选择：' choice </dev/tty || exit 1
-    case "$choice" in
+    heading 'Lauritz Duo · 双协议管理'
+    option 1 '检查现有主备服务'
+    option 2 '客户端导入、订阅与验收'
+    option 3 '端口与防火墙'
+    option 4 '新 VPS：引导安装主备'
+    option 5 '继续部署（网站已配置）'
+    option 6 '主备设为开机启动（客户端验收通过后）'
+    option 7 '查看或更新官方内核'
+    option 8 '自定义规则与备用端口'
+    option 9 '查看全部命令'
+    read -r -p '请选择 [回车默认 1，0 退出]：' selection </dev/tty || exit 1
+    case "${selection:-1}" in
         1) duo status || true ;;
-        2)
-            read -r -p '请输入 VPS 公网 IPv4：' ip </dev/tty || exit 1
-            duo publish "$ip" || true
-            ;;
-        3) duo --help ;;
+        2) client_menu ;;
+        3) firewall_menu ;;
         4) setup || printf '%s\n' '安装未完成，请查看上面的报错。' ;;
         5)
-            read -r -p '请输入站点域名：' domain </dev/tty || exit 1
-            deploy_when_ready "$domain" || true
-            ;;
+            read -r -p '请输入站点域名（0 返回）：' domain </dev/tty || exit 1
+            [[ "$domain" == 0 ]] || deploy_when_ready "$domain" || true ;;
+        6)
+            read -r -p '两条线路已在客户端验收通过？[y/N] ' answer </dev/tty || exit 1
+            if [[ "$answer" == y || "$answer" == Y ]]; then
+                systemctl is-active --quiet sing-box-reality &&
+                    systemctl is-active --quiet sing-box-hy2 &&
+                    systemctl enable sing-box-reality sing-box-hy2 || echo '请先确认主备都在运行。'
+            fi ;;
+        7) core_menu ;;
+        8) custom_menu ;;
+        9) duo --help ;;
         0) exit 0 ;;
         *) printf '%s\n' '无效选项。' >&2 ;;
     esac
