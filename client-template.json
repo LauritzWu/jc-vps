@@ -1,0 +1,367 @@
+{
+  "log": {
+    "level": "info",
+    "timestamp": true
+  },
+  "dns": {
+    "servers": [
+      {
+        "type": "https",
+        "tag": "quad9",
+        "server": "9.9.9.9",
+        "server_port": 443,
+        "path": "/dns-query",
+        "tls": {
+          "enabled": true,
+          "server_name": "dns.quad9.net",
+          "alpn": [
+            "h2"
+          ]
+        },
+        "detour": "PROXY"
+      },
+      {
+        "type": "https",
+        "tag": "alidns-cn",
+        "server": "223.5.5.5",
+        "server_port": 443,
+        "path": "/dns-query",
+        "tls": {
+          "enabled": true,
+          "server_name": "dns.alidns.com",
+          "alpn": [
+            "h2"
+          ]
+        },
+        "detour": "DIRECT"
+      }
+    ],
+    "rules": [
+      {
+        "domain_suffix": [
+          "google.com",
+          "googleapis.com",
+          "gstatic.com",
+          "googleusercontent.com",
+          "googlevideo.com",
+          "googlemail.com",
+          "gmail.com",
+          "gvt1.com",
+          "gvt2.com",
+          "ggpht.com",
+          "youtube.com",
+          "youtu.be",
+          "android.com",
+          "openai.com",
+          "chatgpt.com",
+          "oaistatic.com",
+          "oaiusercontent.com",
+          "x.com",
+          "twitter.com",
+          "twimg.com",
+          "t.co"
+        ],
+        "action": "route",
+        "server": "quad9"
+      },
+      {
+        "domain_suffix": [
+          "iplark.com",
+          "ip.net.coffee",
+          "ping0.cc",
+          "ip.sb",
+          "ipinfo.io",
+          "ipip.net",
+          "ip138.com",
+          "cip.cc",
+          "ip.cn",
+          "ipw.cn",
+          "ip125.com",
+          "ipify.org",
+          "ifconfig.me",
+          "ifconfig.co",
+          "icanhazip.com",
+          "ident.me",
+          "myip.com",
+          "ipapi.co",
+          "ip-api.com",
+          "browserleaks.com",
+          "ipleak.net",
+          "dnsleaktest.com",
+          "whoer.net",
+          "scamalytics.com",
+          "ipqualityscore.com"
+        ],
+        "action": "route",
+        "server": "quad9"
+      },
+      {
+        "rule_set": "cn-media",
+        "action": "route",
+        "server": "alidns-cn"
+      },
+      {
+        "rule_set": "geosite-geolocation-!cn",
+        "action": "route",
+        "server": "quad9"
+      },
+      {
+        "rule_set": "geosite-geolocation-cn",
+        "action": "route",
+        "server": "alidns-cn"
+      }
+    ],
+    "final": "quad9",
+    "strategy": "prefer_ipv4",
+    "cache_capacity": 8192,
+    "reverse_mapping": true
+  },
+  "inbounds": [
+    {
+      "type": "tun",
+      "tag": "tun-in",
+      "address": [
+        "172.19.0.1/30",
+        "fdfe:dcba:9876::1/126"
+      ],
+      "mtu": 1500,
+      "auto_route": true,
+      "dns_mode": "hijack",
+      "strict_route": true
+    },
+    {
+      "type": "mixed",
+      "tag": "mixed-in",
+      "listen": "127.0.0.1",
+      "listen_port": 2080
+    }
+  ],
+  "outbounds": [
+    {
+      "type": "selector",
+      "tag": "PROXY",
+      "outbounds": []
+    },
+    {
+      "type": "direct",
+      "tag": "DIRECT"
+    }
+  ],
+  "route": {
+    "rules": [
+      {
+        "port": 53,
+        "action": "hijack-dns"
+      },
+      {
+        "ip_is_private": true,
+        "action": "route",
+        "outbound": "DIRECT"
+      },
+      {
+        "network": "tcp",
+        "port": [
+          80,
+          443
+        ],
+        "action": "sniff",
+        "sniffer": [
+          "http",
+          "tls"
+        ],
+        "timeout": "200ms"
+      },
+      {
+        "network": "udp",
+        "port": 443,
+        "action": "sniff",
+        "sniffer": [
+          "quic"
+        ],
+        "timeout": "200ms"
+      },
+      {
+        "network": "udp",
+        "action": "sniff",
+        "sniffer": [
+          "stun",
+          "dtls"
+        ],
+        "timeout": "200ms"
+      },
+      {
+        "protocol": [
+          "stun",
+          "dtls"
+        ],
+        "action": "route",
+        "outbound": "PROXY"
+      },
+      {
+        "domain_suffix": [
+          "google.com",
+          "googleapis.com",
+          "gstatic.com",
+          "googleusercontent.com",
+          "googlevideo.com",
+          "googlemail.com",
+          "gmail.com",
+          "gvt1.com",
+          "gvt2.com",
+          "ggpht.com",
+          "youtube.com",
+          "youtu.be",
+          "android.com",
+          "openai.com",
+          "chatgpt.com",
+          "oaistatic.com",
+          "oaiusercontent.com",
+          "x.com",
+          "twitter.com",
+          "twimg.com",
+          "t.co"
+        ],
+        "action": "route",
+        "outbound": "PROXY"
+      },
+      {
+        "domain_suffix": [
+          "iplark.com",
+          "ip.net.coffee",
+          "ping0.cc",
+          "ip.sb",
+          "ipinfo.io",
+          "ipip.net",
+          "ip138.com",
+          "cip.cc",
+          "ip.cn",
+          "ipw.cn",
+          "ip125.com",
+          "ipify.org",
+          "ifconfig.me",
+          "ifconfig.co",
+          "icanhazip.com",
+          "ident.me",
+          "myip.com",
+          "ipapi.co",
+          "ip-api.com",
+          "browserleaks.com",
+          "ipleak.net",
+          "dnsleaktest.com",
+          "whoer.net",
+          "scamalytics.com",
+          "ipqualityscore.com"
+        ],
+        "action": "route",
+        "outbound": "PROXY"
+      },
+      {
+        "rule_set": "cn-media",
+        "action": "route",
+        "outbound": "DIRECT"
+      },
+      {
+        "rule_set": "geosite-geolocation-!cn",
+        "action": "route",
+        "outbound": "PROXY"
+      },
+      {
+        "rule_set": "geosite-geolocation-cn",
+        "action": "route",
+        "outbound": "DIRECT"
+      }
+    ],
+    "final": "PROXY",
+    "default_domain_resolver": "quad9",
+    "auto_detect_interface": true,
+    "rule_set": [
+      {
+        "type": "inline",
+        "tag": "cn-media",
+        "rules": [
+          {
+            "domain_suffix": [
+              "bilibili.com",
+              "biliapi.com",
+              "biliapi.net",
+              "bilivideo.com",
+              "bilivideo.cn",
+              "hdslb.com",
+              "acgvideo.com",
+              "b23.tv",
+              "iqiyi.com",
+              "iqiyipic.com",
+              "iqiyih5.com",
+              "qiyi.com",
+              "qiyipic.com",
+              "qy.net",
+              "71.am",
+              "71edge.com",
+              "v.qq.com",
+              "video.qq.com",
+              "qqvideo.tc.qq.com",
+              "youku.com",
+              "ykimg.com",
+              "mgtv.com",
+              "hitv.com",
+              "hunantv.com",
+              "music.163.com",
+              "music.126.net",
+              "kugou.com",
+              "kuwo.cn",
+              "y.qq.com",
+              "douyin.com",
+              "douyinvod.com",
+              "douyinstatic.com",
+              "douyincdn.com",
+              "amemv.com",
+              "ixigua.com",
+              "ixiguavideo.com",
+              "kuaishou.com",
+              "gifshow.com",
+              "kwaicdn.com",
+              "ksapisrv.com",
+              "douyu.com",
+              "douyucdn.cn",
+              "huya.com",
+              "huyaimg.com",
+              "cctv.com",
+              "cctv.cn",
+              "cntv.cn"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "remote",
+        "tag": "geosite-geolocation-cn",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-geolocation-cn.srs",
+        "http_client": {
+          "detour": "PROXY",
+          "domain_resolver": "quad9"
+        },
+        "update_interval": "1d"
+      },
+      {
+        "type": "remote",
+        "tag": "geosite-geolocation-!cn",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-geolocation-!cn.srs",
+        "http_client": {
+          "detour": "PROXY",
+          "domain_resolver": "quad9"
+        },
+        "update_interval": "1d"
+      }
+    ]
+  },
+  "experimental": {
+    "cache_file": {
+      "enabled": true,
+      "path": "yg-plus-lax-cache.db",
+      "cache_id": "yg-plus-lax",
+      "store_dns": false
+    }
+  }
+}
