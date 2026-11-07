@@ -512,6 +512,21 @@ CADDY
     printf '订阅已发布 https://%s/profiles/lax.json\n用户名 lax，请在客户端验证认证后可下载。\n' "$domain"
 }
 
+parse_five_ports() {
+    local value=$1 port
+    ports=(auto auto auto auto auto)
+    used=' '
+    [[ -n $value ]] || return 0
+    [[ $value =~ ^(auto|[1-9][0-9]{0,4})(,(auto|[1-9][0-9]{0,4})){4}$ ]] ||
+        fail '请输入五个端口，自动项可用 auto'
+    IFS=, read -ra ports <<<"$value"
+    for port in "${ports[@]}"; do
+        [[ $port != auto ]] || continue
+        port_number "$port" && [[ $used != *" $port "* ]] || fail '端口无效或重复'
+        used+="$port "
+    done
+}
+
 five_deploy() {
     local domain=$1 host=$2 ports_text=$3 user=$4 cert private public short ws hp tp ap i port flag rows label attempt
     local ports=() listeners=() used=' ' dir="/etc/$five/profiles"
@@ -520,14 +535,11 @@ five_deploy() {
     ensure_unused "$five"
     if [[ -z $user ]]; then user=$(cat /proc/sys/kernel/random/uuid); fi
     [[ $user =~ ^[a-fA-F0-9]{8}(-[a-fA-F0-9]{4}){3}-[a-fA-F0-9]{12}$ ]] || fail 'UUID 格式无效'
-    if [[ -n $ports_text ]]; then
-        [[ $ports_text =~ ^[0-9]{1,5}(,[0-9]{1,5}){4}$ ]] || fail '请输入五个端口'
-        IFS=, read -ra ports <<<"$ports_text"
-    fi
+    parse_five_ports "$ports_text"
     for i in "${!kinds[@]}"; do
         flag=-lnt
         [[ ${protocols[i]} == udp ]] && flag=-lnu
-        if [[ -z $ports_text ]]; then
+        if [[ ${ports[i]} == auto ]]; then
             port=''
             for ((attempt=0; attempt<100; attempt++)); do
                 port=$((10000 + (RANDOM * 32768 + RANDOM) % 55536))
@@ -537,12 +549,11 @@ five_deploy() {
             done
             [[ -n $port ]] || fail '未找到可用随机端口'
             ports[i]=$port
+            used+="$port "
         fi
         port=${ports[i]}
-        port_number "$port" && [[ $used != *" $port "* ]] || fail '端口无效或重复'
         rows=$(ss -H "$flag" "( sport = :$port )")
         [[ -z $rows ]] || fail "端口 $port 已被占用"
-        used+="$port "
         listeners+=("$port/${protocols[i]}")
     done
     reality_keys
@@ -724,15 +735,7 @@ case "$command_name" in
         [[ $# -ge 2 && $# -le 4 ]] || fail '缺少域名或公网 IPv4'
         valid_domain "$1"
         valid_ip "$2"
-        if [[ -n ${3:-} ]]; then
-            [[ $3 =~ ^[1-9][0-9]{0,4}(,[1-9][0-9]{0,4}){4}$ ]] || fail '请输入五个端口'
-            IFS=, read -ra requested_ports <<<"$3"
-            used=' '
-            for port in "${requested_ports[@]}"; do
-                port_number "$port" && [[ $used != *" $port "* ]] || fail '端口无效或重复'
-                used+="$port "
-            done
-        fi
+        parse_five_ports "${3:-}"
         if [[ -n ${4:-} ]]; then
             [[ $4 =~ ^[a-fA-F0-9]{8}(-[a-fA-F0-9]{4}){3}-[a-fA-F0-9]{12}$ ]] || fail 'UUID 格式无效'
         fi ;;

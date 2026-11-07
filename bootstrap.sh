@@ -18,7 +18,7 @@ for file in manager.sh client-template.json; do
     curl -4 -fsSL --retry 2 --connect-timeout 8 --max-time 25 "$source_url/$file" -o "$dir/$file"
 done
 (cd "$dir" && sha256sum -c <<'SHA256'
-5f02c386922f324ae8fde55eaa24a9ccbb2499ac8a366688e3814f642835cedc  manager.sh
+4d95ca9e6b5711aadf9969eb6795b3d001cd5153baf3ea24976e2dc9150ef1a1  manager.sh
 d96d8e1440c7b53ef47625820c77fe58c95a4ff0cef1f989d68c53ff099a7d7b  client-template.json
 SHA256
 )
@@ -46,7 +46,8 @@ wait_for_certificate() {
 }
 
 quick_install() {
-    local domain ip ports='' uuid version='' answer detected
+    local domain ip ports='' uuid version='' answer detected port protocol
+    local protocol_ports=() protocol_labels=('VLESS / REALITY (TCP)' 'VMess WS (TCP)' 'Hysteria 2 (UDP)' 'TUIC (UDP)' 'AnyTLS (TCP)')
     local selection
     if [[ -e /etc/sing-box-lauritz-five/config.json || -e /etc/systemd/system/sing-box-lauritz-five.service ]]; then
         echo '已检测到五协议配置。请到 2 管理服务，或到 3 查看节点与订阅。'
@@ -89,9 +90,22 @@ quick_install() {
         0) return 0 ;;
         1) ;;
         2)
-            read -r -p '依次输入 REALITY,VMess,HY2,TUIC,AnyTLS 端口，用英文逗号隔开（0 返回）：' ports </dev/tty || return 1
-            [[ $ports != 0 ]] || return 0
-            [[ $ports =~ ^[1-9][0-9]{0,4}(,[1-9][0-9]{0,4}){4}$ ]] || { echo '请输入五个有效端口。'; return 1; } ;;
+            echo '每项回车自动选择 10000–65535 内的可用端口，输入 0 返回。'
+            for protocol in "${protocol_labels[@]}"; do
+                while true; do
+                    read -r -p "$protocol 端口：" port </dev/tty || return 1
+                    [[ $port != 0 ]] || return 0
+                    if [[ -z $port ]]; then port=auto; break; fi
+                    if [[ $port =~ ^[1-9][0-9]{0,4}$ ]] && (( port <= 65535 )); then
+                        if [[ " ${protocol_ports[*]} " != *" $port "* ]]; then break; fi
+                        echo '这个端口已填写，请换一个。'
+                    else
+                        echo '请输入 1–65535，或按回车自动选择。'
+                    fi
+                done
+                protocol_ports+=("$port")
+            done
+            ports=$(IFS=,; printf '%s' "${protocol_ports[*]}") ;;
         *) echo '无效选项。'; return 1 ;;
     esac
     heading '4/5  节点凭据'
@@ -99,7 +113,12 @@ quick_install() {
     [[ $uuid != 0 ]] || return 0
     duo validate-install "$domain" "$ip" "$ports" "$uuid" || return 1
     heading '5/5  确认安装'
-    printf '域名 %s · IPv4 %s · 端口 %s\n' "$domain" "$ip" "${ports:-自动选择}"
+    printf '域名 %s · IPv4 %s\n' "$domain" "$ip"
+    for protocol in "${!protocol_labels[@]}"; do
+        port=${protocol_ports[protocol]:-auto}
+        if [[ $port == auto ]]; then port=自动选择; fi
+        printf '  %s：%s\n' "${protocol_labels[protocol]}" "$port"
+    done
     echo '安装后按输出放行各节点端口，再进行客户端验收。'
     read -r -p '开始安装？[y/N] ' answer </dev/tty || return 1
     [[ $answer == y || $answer == Y ]] || return 0
