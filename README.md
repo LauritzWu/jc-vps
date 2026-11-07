@@ -4,7 +4,7 @@
 
 ## 一键打开菜单
 
-在 Ubuntu 或 Debian VPS 的 Bash 会话中粘贴。需要 curl 和 Python 3。
+在 Ubuntu 或 Debian VPS 的 root Bash 会话中粘贴。入口需要 curl。菜单和管理命令使用 Bash，JSON 由 jq 处理。
 
 ```bash
 f=$(mktemp) && curl -4 -fSL --connect-timeout 8 --max-time 25 https://raw.githubusercontent.com/LauritzWu/lauritz-duo/main/bootstrap.sh -o "$f" && bash "$f"; r=$?; if [ -n "$f" ]; then rm -f -- "$f"; fi; (exit "$r")
@@ -12,7 +12,7 @@ f=$(mktemp) && curl -4 -fSL --connect-timeout 8 --max-time 25 https://raw.github
 
 首页分为服务状态、安装与部署、客户端与订阅、网络与防火墙、系统工具。支持数字选择、回车默认和子菜单按 0 返回。底部显示系统、接口地址和服务状态。服务器地区通过 ipwho.is 按 VPS 公网出口 IP 查询并缓存 24 小时。5 → 3 可手动覆盖，已保存的地区优先使用。
 
-新 VPS 走「2 安装与部署 → 1 引导安装」，向导会同时安装 duo 快捷命令，并按需补齐 qrencode、OpenSSL、iproute2。已有 VPS 走「5 系统工具 → 5 补齐快捷命令和基础组件」。防火墙规则及 UDP 跳跃仍由对应菜单单独配置。
+首次运行自动安装 `duo` 快捷命令，并通过 APT 补齐缺失的 jq、qrencode、OpenSSL、iproute2 和 flock。以后输入 `duo` 即可打开菜单。新 VPS 选「2 安装与部署 → 1 引导安装」部署主备。防火墙规则及 UDP 跳跃由对应菜单单独配置。
 
 ## 已搭好主备的 VPS
 

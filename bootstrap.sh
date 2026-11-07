@@ -2,7 +2,8 @@
 set -euo pipefail
 umask 077
 
-for dependency in curl python3; do
+if (( EUID != 0 )); then printf '请在 VPS 的 root 会话中运行。\n' >&2; exit 1; fi
+for dependency in curl; do
     if ! command -v "$dependency" >/dev/null; then
         printf '缺少依赖：%s\n' "$dependency" >&2
         exit 1
@@ -12,18 +13,18 @@ done
 printf '%s\n' '正在下载 Lauritz Duo 程序与模板…'
 source_url='https://raw.githubusercontent.com/LauritzWu/lauritz-duo/main'
 dir=$(mktemp -d)
-trap 'rm -f "$dir/lauritz-duo.py" "$dir/client-template.json"; rmdir "$dir"' EXIT
-for file in lauritz-duo.py client-template.json; do
+trap 'rm -f "$dir/manager.sh" "$dir/client-template.json"; rmdir "$dir"' EXIT
+for file in manager.sh client-template.json; do
     curl -4 -fsSL --retry 2 --connect-timeout 8 --max-time 25 "$source_url/$file" -o "$dir/$file"
 done
 (cd "$dir" && sha256sum -c <<'SHA256'
-06a71d26e069695e0381f3ec8733bd5528f4559898b18436aacdb7b1e525472b  lauritz-duo.py
+ba36d07196ba958d4b4e14d4c82909a609c934e9ccc14672e6400672925ee982  manager.sh
 d96d8e1440c7b53ef47625820c77fe58c95a4ff0cef1f989d68c53ff099a7d7b  client-template.json
 SHA256
 )
 
 duo() {
-    python3 "$dir/lauritz-duo.py" "$@" </dev/tty
+    bash "$dir/manager.sh" "$@" </dev/tty
 }
 
 setup() {
@@ -38,7 +39,6 @@ setup() {
     read -r -p '开始安装并配置站点？[y/N] ' answer </dev/tty || return 1
     [[ "$answer" == y || "$answer" == Y ]] || return 0
     duo packages || return 1
-    init_tools || return 1
     duo site "$domain" || return 1
     deploy_when_ready "$domain"
 }
@@ -74,25 +74,7 @@ choose() {
 
 node_links() {
     local links link
-    links=$(python3 - <<'PYLINKS'
-import json
-from pathlib import Path
-from urllib.parse import urlencode, quote
-
-real_dir = Path("/etc/sing-box-reality")
-real = json.loads((real_dir / "config.json").read_text())["inbounds"][0]
-tls = real["tls"]
-saved = dict(line.split("=", 1) for line in (real_dir / "client.txt").read_text().splitlines())
-domain = tls["server_name"]
-query = urlencode(dict(encryption="none", security="reality", sni=domain, fp="chrome",
-                       pbk=saved["Public key"], sid=tls["reality"]["short_id"][0],
-                       type="tcp", flow=real["users"][0]["flow"]))
-hy2 = json.loads(Path("/etc/sing-box-hy2/config.json").read_text())["inbounds"][0]
-print(f'vless://{real["users"][0]["uuid"]}@{domain}:{real["listen_port"]}?{query}#Lauritz-Duo-REALITY')
-print(f'hysteria2://{quote(hy2["users"][0]["password"], safe="")}@{domain}:{hy2["listen_port"]}/?'
-      + urlencode(dict(sni=domain, insecure="0")) + "#Lauritz-Duo-HY2")
-PYLINKS
-) || return 1
+    links=$(duo links) || return 1
     printf '%s\n' '每条链接及其二维码均含凭据，请勿截图或转发。'
     while IFS= read -r link; do
         heading "${link##*#}"
@@ -261,7 +243,7 @@ DUOSH
 
 init_tools() {
     local missing=() pair package tool
-    for pair in qrencode:qrencode openssl:openssl iproute2:ss; do
+    for pair in jq:jq qrencode:qrencode openssl:openssl iproute2:ss util-linux:flock; do
         package=${pair%:*}; tool=${pair#*:}
         command -v "$tool" >/dev/null || missing+=("$package")
     done
@@ -269,7 +251,7 @@ init_tools() {
         apt-get -o Acquire::ForceIPv4=true update &&
             apt-get -o Acquire::ForceIPv4=true install -y "${missing[@]}" || return 1
     fi
-    install_shortcut
+    install_shortcut || printf '%s\n' '快捷命令未安装，仍可继续使用本次菜单。' >&2
 }
 
 shortcut_menu() {
@@ -360,15 +342,13 @@ detect_region() {
     fi
     payload=$(curl --noproxy '*' -4 -fsS --connect-timeout 2 --max-time 3 https://ipwho.is/ 2>/dev/null) ||
         payload=$(curl --noproxy '*' -6 -fsS --connect-timeout 2 --max-time 3 https://ipwho.is/ 2>/dev/null) || payload=''
-    value=$(printf '%s' "$payload" | python3 -c '
-import json, sys
-data = json.load(sys.stdin)
-if data.get("success") is not True:
-    sys.exit(1)
-fields = [data.get(k) for k in ("city", "region", "country")]
-fields.append((data.get("connection") or {}).get("isp"))
-print(", ".join(dict.fromkeys(x for x in fields if isinstance(x, str) and x)))
-' 2>/dev/null) || value=''
+    value=$(jq -er '
+        select(.success == true) |
+        [.city, .region, .country, .connection.isp] |
+        reduce (.[] | strings | select(length > 0)) as $part
+          ([]; if index($part) == null then . + [$part] else . end) |
+        join(", ")
+    ' <<<"$payload" 2>/dev/null) || value=''
     value=$(printf '%s' "$value" | tr -d '[:cntrl:]' | cut -c1-160)
     mkdir -p "$(dirname "$cache")" &&
         printf '%s\n%s\n%s\n' "$now" "$key" "$value" > "$cache" || true
@@ -472,29 +452,71 @@ tools_menu() {
     done
 }
 
-home_banner() {
-    printf '\n%s' "$accent"
-    cat <<'SHEPHERD'
-      /\     /\
-     /  \___/  \
-    /  ^     ^  \      LAURITZ DUO
-   (      Y      )     German Shepherd Edition
-    \    /_\    /
-     \___\_/___/
-SHEPHERD
-    printf '%s%s\n' "$reset" '────────────────────────────────────'
+home_width() {
+    local size rows columns
+    size=$(stty size 2>/dev/null </dev/tty) || size=''
+    read -r rows columns <<< "$size"
+    columns=${columns:-${COLUMNS:-80}}
+    [[ "$columns" =~ ^[1-9][0-9]{0,3}$ ]] || columns=80
+    if (( columns > 104 )); then columns=104; fi
+    printf '%s' "$columns"
 }
 
+home_rule() {
+    local padding
+    printf -v padding '%*s' "$1" ''
+    printf '%s%s%s\n' "$accent" "${padding// /─}" "$reset"
+}
+
+home_banner() {
+    printf '\n'
+    home_rule "$1"
+    printf '%s' "$accent"
+    if (( $1 >= 78 )); then
+        cat <<'SHEPHERD'
+           /\                 /\
+          /  \               /  \
+         / /\ \_____________/ /\ \
+        / /  \               /  \ \       ██████╗ ██╗   ██╗ ██████╗
+       /_/    \             /    \_\      ██╔══██╗██║   ██║██╔═══██╗
+       \       ●           ●       /      ██║  ██║██║   ██║██║   ██║
+        \         _______         /       ██║  ██║██║   ██║██║   ██║
+         \       /       \       /        ██████╔╝╚██████╔╝╚██████╔╝
+          \_____ \___▼___/ _____/         ╚═════╝  ╚═════╝  ╚═════╝
+                \___/ \___/
+                                          LAURITZ DUO
+                                          GERMAN SHEPHERD EDITION
+SHEPHERD
+    elif (( $1 >= 48 )); then
+        cat <<'SHEPHERD'
+       /\       /\
+      /  \_____/  \
+     /  ●       ●  \
+     \      ▼      /    LAURITZ DUO
+      \____/ \____/     German Shepherd Edition
+SHEPHERD
+    else
+        printf '%s\n' '  /\___/\' ' ( ^ Y ^ )' '  LAURITZ DUO'
+    fi
+    printf '%s' "$reset"
+    home_rule "$1"
+}
+
+init_tools
+
 while true; do
-    home_banner
+    width=$(home_width)
+    home_banner "$width"
+    heading '管理菜单'
     option 1 '服务状态'
     option 2 '安装与部署'
     option 3 '客户端与订阅'
     option 4 '网络与防火墙'
     option 5 '系统工具'
     option 0 '退出'
-    printf '%s\n' '────────────────────────────────────'
+    home_rule "$width"
     vps_summary
+    home_rule "$width"
     read -r -p '请选择 [回车默认 1，0 退出]：' selection </dev/tty || exit 1
     case "${selection:-1}" in
         1) duo status || true ;;
