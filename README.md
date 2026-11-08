@@ -2,17 +2,17 @@
 
 面向个人 VPS 的 sing-box 管理工具。使用官方 APT 版 sing-box，提供五协议安装向导，支持选择 IPv4 或 IPv6 节点地址，并可发布带密码的 HTTPS 订阅，并兼容已有 REALITY / Hysteria 2 主备服务。
 
-## 安装 v1.1.0
+## 一键安装
 
 在 VPS 的 root Bash 会话中运行。入口需要 curl。安装脚本、管理脚本、客户端模板和后续的 `jc` 命令均使用同一提交。
 
 ```bash
-revision=cb3f61c6a6c963d52e011af1454490b721a362a0
+revision=e5df789b90867ddc7a23cafd93ad7eeeb5912e36
 s=$(curl -4fsSL -m 25 "https://raw.githubusercontent.com/LauritzWu/jc-vps/$revision/bootstrap.sh") &&
   bash -c "$s" -- "$revision"
 ```
 
-在菜单选「6 一键安装 sing-box」。其他版本的安装命令见 [GitHub Releases](https://github.com/LauritzWu/jc-vps/releases)。
+在菜单选「6 一键安装 sing-box」。此入口包含回车确认安装、安装后默认查看节点，以及改进的证书和卸载提示。已发布版本见 [GitHub Releases](https://github.com/LauritzWu/jc-vps/releases)。
 
 **已验收范围**为 Ubuntu 24.04 LTS 和 Debian 13，均为 x86_64、IPv4。五个协议均通过公网连通测试，两套系统也通过了公信证书签发、订阅认证、重启恢复、内核切换和失败回退，以及卸载重装。五协议也已通过公网 IPv6 连通测试，IPv6 订阅已在隔离环境验收，分享链接已通过 v2rayN 导入检查。详见 [v1.1.0 发布说明](https://github.com/LauritzWu/jc-vps/releases/tag/v1.1.0)。
 
