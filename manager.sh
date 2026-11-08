@@ -877,10 +877,48 @@ CADDY
     fi
 }
 
+bbr() {
+    local file=/etc/sysctl.d/99-jc-bbr.conf current available
+    current=$(sysctl -n net.ipv4.tcp_congestion_control) || fail '无法读取 TCP 拥塞控制状态'
+    case "$1" in
+        status)
+            printf '当前 TCP 拥塞控制 %s\n' "$current"
+            printf '内核可用算法 '
+            sysctl -n net.ipv4.tcp_available_congestion_control
+            ;;
+        enable)
+            if [[ -e $file || -L $file ]]; then
+                [[ -f $file && ! -L $file ]] && grep -qxF '# Managed by JC' "$file" ||
+                    fail "发现已有配置 $file，请先检查"
+            fi
+            available=$(sysctl -n net.ipv4.tcp_available_congestion_control) || fail '无法读取内核可用算法'
+            if [[ " $available " != *' bbr '* ]]; then
+                modprobe tcp_bbr 2>/dev/null || fail '当前内核或 VPS 未提供 BBR'
+                available=$(sysctl -n net.ipv4.tcp_available_congestion_control) || fail '无法读取内核可用算法'
+                [[ " $available " == *' bbr '* ]] || fail '当前内核或 VPS 未提供 BBR'
+            fi
+            sysctl -w net.ipv4.tcp_congestion_control=bbr >/dev/null ||
+                fail 'VPS 拒绝更改 TCP 拥塞控制'
+            if ! put "$file" 644 root <<'CONF'
+# Managed by JC
+net.ipv4.tcp_congestion_control = bbr
+CONF
+            then
+                sysctl -w "net.ipv4.tcp_congestion_control=$current" >/dev/null ||
+                    fail "无法保存配置，恢复原算法 $current 也失败，请检查 sysctl"
+                fail "无法保存配置，已恢复原算法 $current"
+            fi
+            printf '已启用 TCP BBR，开机配置位于 %s。\n' "$file"
+            ;;
+        *) fail '用法 bbr status|enable' ;;
+    esac
+}
+
 help_text() {
     cat <<'HELP'
 JC
   packages [--restart-managed] [--version VERSION]
+  bbr status|enable
   uninstall
   site DOMAIN
   deploy DOMAIN [--ipv6]
@@ -917,6 +955,7 @@ case "$command_name" in
             [[ $4 =~ ^[a-fA-F0-9]{8}(-[a-fA-F0-9]{4}){3}-[a-fA-F0-9]{12}$ ]] || fail 'UUID 格式无效'
         fi ;;
     packages) packages "$@";;
+    bbr) [[ $# == 1 ]] || fail '用法 bbr status|enable'; bbr "$1";;
     uninstall) [[ $# == 0 ]] || fail '用法 uninstall'; uninstall;;
     site) [[ $# == 1 ]] || fail '用法 site DOMAIN'; site "$1";;
     deploy)
