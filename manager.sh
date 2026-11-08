@@ -50,6 +50,16 @@ valid_ip() {
        !(a==198 && (b==18 || b==19 || (b==51 && c==100))) && !(a==203 && b==0 && c==113) )) ||
         fail '请输入公网 IPv4'
 }
+valid_node_address() {
+    if [[ $1 != *:* ]]; then
+        valid_ip "$1"
+        return
+    fi
+    [[ $1 =~ ^[23][[:xdigit:]]{3}:[[:xdigit:]:]+$ ]] ||
+        fail '请输入公网 IPv6（不带方括号、端口或接口名）'
+    ip -6 route get "$1" >/dev/null 2>&1 ||
+        fail 'IPv6 地址无效或 VPS 无 IPv6 路由'
+}
 site_curl() {
     curl --noproxy '*' --max-time 8 --resolve "$1:8443:127.0.0.1" "${@:3}" "https://$1:8443$2"
 }
@@ -638,8 +648,14 @@ pick_port() {
 
 five_deploy() {
     local domain=$1 host=$2 ports_text=$3 user=$4 cert private public short ws hp tp ap i port flag rows label
-    local ports=() listeners=() used=' ' dir="/etc/$five/profiles"
-    valid_ip "$host"
+    local listen=0.0.0.0 uri_host=$2
+    local ports=() listeners=() used=' ' dir
+    dir="$(dirname -- "$(cfg "$five")")/profiles"
+    valid_node_address "$host"
+    if [[ $host == *:* ]]; then
+        listen=::
+        uri_host="[$host]"
+    fi
     preflight "$domain"
     ensure_unused "$five"
     if [[ -z $user ]]; then user=$(cat /proc/sys/kernel/random/uuid); fi
@@ -665,7 +681,7 @@ five_deploy() {
     ap=$(openssl rand -hex 24)
     jq -n --args '$ARGS.positional | map(tonumber)' "${ports[@]}" >"$scratch/ports.json"
     DUO_UUID=$user DUO_KEY=$private DUO_SID=$short DUO_WS=$ws DUO_HP=$hp DUO_TP=$tp DUO_AP=$ap \
-    jq -n --slurpfile ports "$scratch/ports.json" --arg domain "$domain" --arg host "$host" \
+    jq -n --slurpfile ports "$scratch/ports.json" --arg domain "$domain" --arg host "$host" --arg listen "$listen" \
         --arg pub "$public" --arg cert "$cert" --arg certkey "${cert%.crt}.key" '
       $ENV.DUO_UUID as $uuid | $ENV.DUO_KEY as $key | $ENV.DUO_SID as $sid | $ENV.DUO_WS as $ws |
       $ENV.DUO_HP as $hp | $ENV.DUO_TP as $tp | $ENV.DUO_AP as $ap |
@@ -690,20 +706,20 @@ five_deploy() {
         {type:"anytls",password:$ap,tls:$tls}
       ] as $outs |
       ["reality","vmess","hy2","tuic","anytls"] as $tags |
-      {ins:[range(5) as $i | $ins[$i]+{listen:"0.0.0.0",listen_port:$ports[0][$i]}],
+      {ins:[range(5) as $i | $ins[$i]+{listen:$listen,listen_port:$ports[0][$i]}],
        outs:[range(5) as $i | $outs[$i]+{tag:$tags[$i],server:$host,server_port:$ports[0][$i]}]}
     ' >"$scratch/five.json"
     jq '.ins' "$scratch/five.json" | server_doc >"$scratch/server.json"
     check "$scratch/server.json"
     {
-        reality_uri "$user" "$host" "${ports[0]}" "$short" JC-VLESS
+        reality_uri "$user" "$uri_host" "${ports[0]}" "$short" JC-VLESS
         printf 'vmess://'
         DUO_UUID=$user DUO_WS=$ws jq -cn --arg host "$host" --arg port "${ports[1]}" --arg sni "$domain" \
             '{v:"2",ps:"JC-VMESS",add:$host,port:$port,id:$ENV.DUO_UUID,aid:"0",scy:"auto",net:"ws",
               type:"none",path:$ENV.DUO_WS,tls:"tls",sni:$sni,host:$sni}' | base64 -w0
-        printf '\nhysteria2://%s@%s:%s?sni=%s&insecure=0#JC-HY2\n' "$hp" "$host" "${ports[2]}" "$domain"
-        printf 'tuic://%s:%s@%s:%s?sni=%s&alpn=h3#JC-TUIC\n' "$user" "$tp" "$host" "${ports[3]}" "$domain"
-        printf 'anytls://%s@%s:%s?sni=%s#JC-ANYTLS\n' "$ap" "$host" "${ports[4]}" "$domain"
+        printf '\nhysteria2://%s@%s:%s?sni=%s&insecure=0#JC-HY2\n' "$hp" "$uri_host" "${ports[2]}" "$domain"
+        printf 'tuic://%s:%s@%s:%s?sni=%s&alpn=h3#JC-TUIC\n' "$user" "$tp" "$uri_host" "${ports[3]}" "$domain"
+        printf 'anytls://%s@%s:%s?sni=%s#JC-ANYTLS\n' "$ap" "$uri_host" "${ports[4]}" "$domain"
     } >"$scratch/links.txt"
     new_service "$five"
     mkdir -m 700 "$dir"
@@ -873,7 +889,7 @@ JC
   publish IPV4 [--template FILE] [--hop-range START:END]
   rules SERVICE
   hopping FIRST LAST
-  five DOMAIN IPV4 [--ports P1,P2,P3,P4,P5] [--uuid UUID] [--template FILE]
+  five DOMAIN IP [--ports P1,P2,P3,P4,P5] [--uuid UUID] [--template FILE]
   five-share [--publish]
 HELP
 }
@@ -892,9 +908,9 @@ trap 'exit 143' TERM
 case "$command_name" in
     pick-port) [[ $# -ge 1 ]] || fail '缺少传输协议'; pick_port "$@";;
     validate-install)
-        [[ $# -ge 2 && $# -le 4 ]] || fail '缺少域名或公网 IPv4'
+        [[ $# -ge 2 && $# -le 4 ]] || fail '缺少域名或公网节点地址'
         valid_domain "$1"
-        valid_ip "$2"
+        valid_node_address "$2"
         parse_five_ports "${3:-}"
         if [[ -n ${4:-} ]]; then
             [[ $4 =~ ^[a-fA-F0-9]{8}(-[a-fA-F0-9]{4}){3}-[a-fA-F0-9]{12}$ ]] || fail 'UUID 格式无效'
