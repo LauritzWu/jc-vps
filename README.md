@@ -1,24 +1,24 @@
-# JC
+# JC · sing-box VPS 管理工具
 
-面向个人 VPS 的 sing-box 管理工具。使用官方 APT 版 sing-box，提供五协议安装向导、Caddy HTTPS 和受密码保护的远程配置，并兼容已有 REALITY / Hysteria 2 主备服务。
+面向个人 VPS 的 sing-box 管理工具。使用官方 APT 版 sing-box，提供五协议安装向导，支持选择 IPv4 或 IPv6 节点地址，并可发布带密码的 HTTPS 订阅，并兼容已有 REALITY / Hysteria 2 主备服务。
 
-## 安装 v1.0.0
+## 安装 v1.1.0
 
 在 VPS 的 root Bash 会话中运行。入口需要 curl。安装脚本、管理脚本、客户端模板和后续的 `jc` 命令均使用同一提交。
 
 ```bash
-revision=7c6f44aef067993efd9062ea0260f4cadf7e88ba
+revision=cb3f61c6a6c963d52e011af1454490b721a362a0
 s=$(curl -4fsSL -m 25 "https://raw.githubusercontent.com/LauritzWu/lauritz-duo/$revision/bootstrap.sh") &&
   bash -c "$s" -- "$revision"
 ```
 
 在菜单选「6 一键安装 sing-box」。其他版本的安装命令见 [GitHub Releases](https://github.com/LauritzWu/lauritz-duo/releases)。
 
-**已验收范围**为 Ubuntu 24.04 LTS 和 Debian 13，均为 x86_64、IPv4。五个协议均通过公网连通测试，两套系统也通过了公信证书签发、订阅认证、重启恢复、内核切换和失败回退，以及卸载重装。详见 [v1.0.0 发布说明](https://github.com/LauritzWu/lauritz-duo/releases/tag/v1.0.0)。
+**已验收范围**为 Ubuntu 24.04 LTS 和 Debian 13，均为 x86_64、IPv4。五个协议均通过公网连通测试，两套系统也通过了公信证书签发、订阅认证、重启恢复、内核切换和失败回退，以及卸载重装。五协议也已通过公网 IPv6 连通测试，IPv6 订阅已在隔离环境验收，分享链接已通过 v2rayN 导入检查。详见 [v1.1.0 发布说明](https://github.com/LauritzWu/lauritz-duo/releases/tag/v1.1.0)。
 
 首页包含服务状态、服务管理、客户端与订阅、网络与防火墙和系统工具。支持数字选择、回车默认和子菜单按 0 返回。底部显示系统、接口地址和服务状态。服务器地区通过 ipwho.is 按 VPS 公网出口 IP 查询并缓存 24 小时。5 → 3 可手动覆盖，已保存的地区优先使用。
 
-首次运行自动安装 `jc` 快捷命令，并通过 APT 补齐缺失的 jq、qrencode、OpenSSL、iproute2 和 flock。以后输入 `jc` 即可打开菜单。已有 `duo` 的用户可运行一次 `duo`，新版会自动安装 `jc`。主菜单选「6 一键安装 sing-box」，按顺序选择内核、输入域名和 IPv4、分配端口、生成或填写 UUID，最后确认安装。旧主备仍可在「2 服务管理」启动。
+首次运行自动安装 `jc` 快捷命令，并通过 APT 补齐缺失的 jq、qrencode、OpenSSL、iproute2 和 flock。以后输入 `jc` 即可打开菜单。已有 `duo` 的用户可运行一次 `duo`，新版会自动安装 `jc`。主菜单选「6 一键安装 sing-box」，按顺序选择内核、输入域名和公网节点地址（IPv4 或 IPv6）、分配端口、生成或填写 UUID，最后确认安装。旧主备仍可在「2 服务管理」启动。
 
 ## 卸载和重装
 
@@ -35,7 +35,7 @@ publish 使用随附的无凭据模板，从现有 /etc/sing-box-reality 和 /et
 
 ## 新 VPS
 
-确认域名直指 VPS，公网 TCP 80 可用于 Caddy 签发和续期，随后选主菜单 6。安装后按输出在云防火墙放行各协议对应的 TCP 或 UDP 端口。客户端验收通过后，在「2 服务管理」开启五协议自启动。命令行入口见 `bash duo.sh --help`。
+确认域名直指 VPS，公网 TCP 80 可用于 Caddy 签发和续期，随后选主菜单 6。每次安装选择一种节点地址。选择 IPv6 时，输入不带方括号的公网地址，并确认 VPS 和客户端都具备 IPv6 连通性。下载安装脚本和依赖仍需要 VPS 的 IPv4 出站。安装后按输出在云防火墙放行各协议对应的 TCP 或 UDP 端口。客户端验收通过后，在「2 服务管理」开启五协议自启动。命令行入口见 `bash duo.sh --help`。
 
 ## 五协议节点与订阅
 
@@ -55,4 +55,4 @@ publish 使用随附的无凭据模板，从现有 /etc/sing-box-reality 和 /et
 
 此版本从此前为 sing-box-yg 改版编写的独立管理模块拆出。发行包不包含上游 sb.sh，旧菜单、旧快捷入口及旧脚本的自更新逻辑已移除。原型参考 yonggekkk/sing-box-yg，基准提交 b13f9435c4792fccf04d4fbc73e24a1948abff1b。项目独立维护，与上游作者及 SagerNet 无隶属关系。代码采用 GPL-3.0，许可证见 LICENSE。
 
-证书自然续期后的公网复测、五协议 IPv6 和 HY2 公网端口跳跃仍待验收。见 [VPS 验收清单](docs/vps-acceptance.md)。
+证书自然续期后的公网复测和 HY2 公网端口跳跃仍待验收。见 [VPS 验收清单](docs/vps-acceptance.md)。
