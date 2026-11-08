@@ -24,7 +24,7 @@ for file in manager.sh client-template.json; do
     curl -4 -fsSL --retry 2 --connect-timeout 8 --max-time 25 "$source_url/$file" -o "$dir/$file"
 done
 (cd "$dir" && sha256sum -c <<'SHA256'
-4ee5b267bc02bb2f8299fdb4a6d5c282060944f77b17f1aef330b0fbb2cfa41f  manager.sh
+b0364759abd185dd6328848f687da582efe0446c648ce1e0a2c7f5f90b233419  manager.sh
 d96d8e1440c7b53ef47625820c77fe58c95a4ff0cef1f989d68c53ff099a7d7b  client-template.json
 SHA256
 )
@@ -557,6 +557,7 @@ tools_menu() {
         option 3 '手动覆盖服务器地区'
         option 4 '查看全部命令'
         option 5 '补齐快捷命令和基础组件'
+        option 6 '查看或启用 TCP BBR'
         choose 1
         case "$selection" in
             0) return ;;
@@ -567,6 +568,10 @@ tools_menu() {
             5)
                 read -r -p '补齐快捷命令和缺失的基础组件？[Y/N] ' answer </dev/tty || return
                 if [[ "$answer" == y || "$answer" == Y ]]; then init_tools || true; fi ;;
+            6)
+                duo bbr status || continue
+                read -r -p '启用系统级 TCP BBR 并保存为开机配置？[y/N] ' answer </dev/tty || return
+                if [[ $answer == [yY] ]]; then duo bbr enable || true; fi ;;
             *) echo '无效选项。' ;;
         esac
     done
