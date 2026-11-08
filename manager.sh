@@ -75,9 +75,11 @@ reload_site() {
     fi
 }
 packages() {
-    local version=${2:-} key=/etc/apt/keyrings/sagernet.asc source=/etc/apt/sources.list.d/sagernet.sources
+    local managed=false version key=/etc/apt/keyrings/sagernet.asc source=/etc/apt/sources.list.d/sagernet.sources
     local apt=(apt-get -o Acquire::ForceIPv4=true)
     local target=(sing-box)
+    if [[ ${1:-} == --restart-managed ]]; then managed=true; shift; fi
+    version=${2:-}
     if (( $# )); then
         [[ $# == 2 && $1 == --version && $version =~ ^[0-9][0-9A-Za-z.+:~\-]*$ ]] ||
             fail '请输入完整 APT 版本号'
@@ -104,8 +106,60 @@ Signed-By: /etc/apt/keyrings/sagernet.asc
 APT
     fi
     "${apt[@]}" update
-    "${apt[@]}" install -y "${target[@]}"
+    if $managed && [[ -x $core ]]; then
+        upgrade_managed "${target[@]}"
+    else
+        "${apt[@]}" install -y "${target[@]}"
+    fi
     "$core" version
+}
+
+restart_managed() {
+    local service=$1 ports
+    local listeners=()
+    ports=$(jq -er '.inbounds[] | select(.listen_port > 0) |
+        "\(.listen_port)/\(if .type == "hysteria2" or .type == "tuic" then "udp" else "tcp" end)"' "$(cfg "$service")") || return 1
+    mapfile -t listeners <<<"$ports"
+    systemctl restart "$service" && socket_ready "$service" "${listeners[@]}"
+}
+
+upgrade_managed() {
+    local installed service
+    local saved=()
+    local apt=(apt-get -o Acquire::ForceIPv4=true)
+    installed=$(dpkg-query -W -f='${Version}' sing-box) || fail '未找到已安装的 sing-box 软件包'
+    dpkg-query -S "$core" >/dev/null || fail '当前内核由其他方式安装'
+    if systemctl is-active --quiet sing-box; then
+        fail '检测到独立的 sing-box 服务，请先安排其升级'
+    fi
+    "${apt[@]}" -s install "$@" >/dev/null || fail '无法安装目标版本，当前版本仍在运行'
+    for service in "$real" "$hy2" "$five" "$legacy_five"; do
+        [[ " ${upgrade_running[*]} " != *" $service "* ]] || continue
+        if systemctl is-active --quiet "$service"; then
+            check "$(cfg "$service")" || fail "$service 当前配置无法通过校验"
+            upgrade_running+=("$service")
+        fi
+    done
+
+    (cd "$scratch" && "${apt[@]}" download "sing-box=$installed") ||
+        fail '无法下载当前版本作为回退包，已取消切换'
+    saved=("$scratch"/sing-box_*.deb)
+    [[ ${#saved[@]} == 1 && -f ${saved[0]} &&
+        $(dpkg-deb -f "${saved[0]}" Package) == sing-box &&
+        $(dpkg-deb -f "${saved[0]}" Version) == "$installed" ]] ||
+        fail '回退包校验失败，已取消切换'
+
+    upgrade_backup=${saved[0]}
+    printf '正在切换 sing-box 版本，运行中的 JC 服务将短暂重启。\n'
+    NEEDRESTART_MODE=l "${apt[@]}" install -y "$@" || fail '安装失败，正在恢复原版本'
+    for service in "${upgrade_running[@]}"; do
+        check "$(cfg "$service")" || fail "$service 配置校验失败，正在恢复原版本"
+    done
+    for service in "${upgrade_running[@]}"; do
+        restart_managed "$service" || fail "$service 启动或监听验证失败，正在恢复原版本"
+    done
+    upgrade_backup=''
+    printf '版本切换完成。请从客户端复测连接。\n'
 }
 uninstall() {
     local state service pid answer package processes fragment kind ext
@@ -255,9 +309,25 @@ check() { "$core" check -c "$1"; }
 
 created=() started=()
 rollback_config='' rollback_backup='' rollback_service=''
+upgrade_backup='' upgrade_running=()
 cleanup() {
-    local code=$? name
+    local code=$? name recovered=true
     if (( code != 0 )); then
+        if [[ -n $upgrade_backup ]]; then
+            if NEEDRESTART_MODE=l apt-get -y install --reinstall --allow-downgrades --no-download "$upgrade_backup"; then
+                for name in "${upgrade_running[@]}"; do
+                    restart_managed "$name" || recovered=false
+                done
+            else
+                recovered=false
+            fi
+            if $recovered; then
+                printf '已恢复原 sing-box 版本和运行中的 JC 服务。\n' >&2
+            else
+                printf '自动恢复失败，原版本安装包保留在 %s\n' "$upgrade_backup" >&2
+                return "$code"
+            fi
+        fi
         if [[ -n $rollback_config ]]; then
             if private_put "$rollback_config" <"$rollback_backup"; then
                 systemctl restart "$rollback_service" || true
@@ -793,7 +863,7 @@ CADDY
 help_text() {
     cat <<'HELP'
 JC
-  packages [--version VERSION]
+  packages [--restart-managed] [--version VERSION]
   uninstall
   site DOMAIN
   deploy DOMAIN [--ipv6]

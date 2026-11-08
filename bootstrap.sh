@@ -2,6 +2,12 @@
 set -euo pipefail
 umask 077
 
+revision=${1:-main}
+if (( $# > 1 )) || [[ $revision != main && ! $revision =~ ^[0-9a-f]{40}$ ]]; then
+    printf '用法：bootstrap.sh [完整 Git 提交 SHA]\n' >&2
+    exit 2
+fi
+
 if (( EUID != 0 )); then printf '请在 VPS 的 root 会话中运行。\n' >&2; exit 1; fi
 for dependency in curl; do
     if ! command -v "$dependency" >/dev/null; then
@@ -10,15 +16,15 @@ for dependency in curl; do
     fi
 done
 
-printf '%s\n' '正在下载 JC 程序与模板…'
-source_url='https://raw.githubusercontent.com/LauritzWu/lauritz-duo/main'
+printf '正在下载 JC 程序与模板（%s）…\n' "$revision"
+source_url="https://raw.githubusercontent.com/LauritzWu/lauritz-duo/$revision"
 dir=$(mktemp -d)
 trap 'rm -f "$dir/manager.sh" "$dir/client-template.json"; rmdir "$dir"' EXIT
 for file in manager.sh client-template.json; do
     curl -4 -fsSL --retry 2 --connect-timeout 8 --max-time 25 "$source_url/$file" -o "$dir/$file"
 done
 (cd "$dir" && sha256sum -c <<'SHA256'
-2e27cc57fd8ba5c5889bb95ecdde43fd50a38a44a7738b5c560937b6453b2b8e  manager.sh
+43a080ee4a75afee3c99875dfda58b881b4ff80823aad4b6ebfdfc34ed68511c  manager.sh
 d96d8e1440c7b53ef47625820c77fe58c95a4ff0cef1f989d68c53ff099a7d7b  client-template.json
 SHA256
 )
@@ -62,7 +68,7 @@ quick_install() {
         '已有主备服务可继续运行。新五协议使用另外分配的端口。'
     heading '1/5  官方内核'
     option 1 '使用已安装的官方内核；新机安装 APT 稳定版'
-    option 2 '指定官方 APT 版本（升级或降级）'
+        option 2 '指定官方 APT 版本（运行中的 JC 服务会短暂重启）'
     choose 1
     case "$selection" in
         0) return 0 ;;
@@ -144,7 +150,7 @@ quick_install() {
     read -r -p "${yellow}开始安装？[Y/N，回车取消] $reset" answer </dev/tty || return 1
     [[ $answer == y || $answer == Y ]] || return 0
     if [[ -n $version ]]; then
-        duo packages --version "$version" || return 1
+        duo packages --restart-managed --version "$version" || return 1
     elif [[ ! -x /usr/bin/sing-box ]] || ! command -v caddy >/dev/null; then
         duo packages || return 1
     fi
@@ -285,13 +291,12 @@ core_menu() {
                 apt-cache madison sing-box || true
                 read -r -p '输入完整版本号（0 返回）：' version </dev/tty || return
                 [[ "$version" == 0 || -z "$version" ]] && continue
-                read -r -p '安装该版本（可能降级），确认？[Y/N] ' answer </dev/tty || return
-                if [[ "$answer" == y || "$answer" == Y ]]; then duo packages --version "$version" || true; fi ;;
+                read -r -p '切换版本并重启运行中的 JC 服务（连接会短暂中断）？[Y/N] ' answer </dev/tty || return
+                if [[ "$answer" == y || "$answer" == Y ]]; then duo packages --restart-managed --version "$version" || true; fi ;;
             2)
-                read -r -p '安装或升级 APT 稳定版？[Y/N] ' answer </dev/tty || return
+                read -r -p '安装或升级 APT 稳定版（运行中的 JC 服务会短暂重启）？[Y/N] ' answer </dev/tty || return
                 if [[ "$answer" == y || "$answer" == Y ]]; then
-                    duo packages || true
-                    echo '已有服务请在备用线路可用时分别重启并复测，以加载新程序。'
+                    duo packages --restart-managed || true
                 fi ;;
             *) echo '无效选项。' ;;
         esac
@@ -325,28 +330,29 @@ install_shortcut() {
     if [[ -e "$target" || -L "$target" ]]; then
         if [[ -f "$target" && ! -L "$target" && -x "$target" ]] &&
             grep -qxF -e '# Managed by JC' -e '# Managed by Lauritz Duo' "$target"; then
-            echo 'jc 快捷命令已安装。'
-            return 0
+            if grep -qxF "revision=$revision" "$target"; then
+                echo 'jc 快捷命令已安装。'
+                return 0
+            fi
+        else
+            echo '发现其他程序使用 /usr/local/bin/jc，保留原文件。' >&2
+            return 1
         fi
-        echo '发现其他程序使用 /usr/local/bin/jc，保留原文件。' >&2
-        return 1
     fi
-    temp=$(mktemp) || return 1
-    cat > "$temp" <<'DUOSH'
-#!/usr/bin/env bash
-# Managed by JC
-set -eu
+    temp=$(mktemp /usr/local/bin/.jc.XXXXXX) || return 1
+    if ! {
+        printf '%s\n' '#!/usr/bin/env bash' '# Managed by JC' 'set -eu' "revision=$revision"
+        cat <<'DUOSH'
 f=$(mktemp)
 trap 'rm -f "$f"' EXIT
-curl -4 -fsSL --connect-timeout 8 --max-time 25 https://raw.githubusercontent.com/LauritzWu/lauritz-duo/main/bootstrap.sh -o "$f"
-bash "$f"
+curl -4 -fsSL --connect-timeout 8 --max-time 25 "https://raw.githubusercontent.com/LauritzWu/lauritz-duo/$revision/bootstrap.sh" -o "$f"
+bash "$f" "$revision"
 DUOSH
-    if ! install -m 0755 "$temp" "$target"; then
+    } > "$temp" || ! chmod 0755 "$temp" || ! mv -fT -- "$temp" "$target"; then
         rm -f -- "$temp"
         return 1
     fi
-    rm -f -- "$temp"
-    echo 'jc 快捷命令已安装。'
+    printf 'jc 快捷命令已安装（%s）。\n' "$revision"
 }
 
 init_tools() {
