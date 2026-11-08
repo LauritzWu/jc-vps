@@ -321,9 +321,17 @@ check() { "$core" check -c "$1"; }
 created=() started=()
 rollback_config='' rollback_backup='' rollback_service=''
 upgrade_backup='' upgrade_running=()
+port_backup='' port_paths=()
 cleanup() {
     local code=$? name recovered=true
     if (( code != 0 )); then
+        if [[ -n $port_backup ]]; then
+            if restore_five_port; then
+                printf '已恢复原监听端口和客户端配置。备份位于 %s\n' "$port_backup" >&2
+            else
+                printf '自动恢复未完成，备份位于 %s\n' "$port_backup" >&2
+            fi
+        fi
         if [[ -n $upgrade_backup ]]; then
             if NEEDRESTART_MODE=l apt-get -y install --reinstall --allow-downgrades --no-download "$upgrade_backup"; then
                 for name in "${upgrade_running[@]}"; do
@@ -755,6 +763,107 @@ five_deploy() {
     printf '客户端配置与分享链接位于 %s\n' "$dir"
 }
 
+put_port_file() {
+    if [[ $1 == "$profiles/five/"* ]]; then
+        put "$1" 640 caddy
+    else
+        private_put "$1"
+    fi
+}
+
+restore_five_port() {
+    local i restored=true
+    for i in "${!port_paths[@]}"; do
+        put_port_file "${port_paths[i]}" <"$port_backup/$i" || restored=false
+    done
+    restart_managed "$five" || restored=false
+    "$restored"
+}
+
+change_five_port() {
+    local kind=$1 new_port=$2 i old_port config dir type link authority flag transport rows domain file label ext
+    local links=() files=()
+    for i in "${!kinds[@]}"; do
+        [[ ${kinds[i]} != "$kind" ]] || break
+    done
+    [[ ${kinds[i]} == "$kind" ]] || fail '未知五协议节点'
+    port_number "$new_port" || fail '端口必须在 1–65535 之间'
+    systemctl is-active --quiet "$five" || fail '请先启动五协议服务'
+    config=$(cfg "$five")
+    dir="$(dirname -- "$config")/profiles"
+    old_port=$(jq -er --argjson i "$i" '.inbounds[$i].listen_port' "$config")
+    if [[ $old_port == "$new_port" ]]; then printf '当前已使用端口 %s。\n' "$new_port"; return; fi
+    jq -e --argjson port "$new_port" 'all(.inbounds[]; .listen_port != $port)' "$config" >/dev/null ||
+        fail '其他 JC 节点已使用该端口'
+    transport=${protocols[i]}
+    flag=-lnt
+    if [[ $transport == udp ]]; then flag=-lnu; fi
+    rows=$(ss -H "$flag" "( sport = :$new_port )")
+    [[ -z $rows ]] || fail "端口 $new_port/${protocols[i]} 已被占用"
+
+    mkdir "$scratch/port"
+    jq --argjson i "$i" --argjson port "$new_port" '.inbounds[$i].listen_port = $port' "$config" >"$scratch/port/config.json"
+    check "$scratch/port/config.json"
+    mapfile -t links <"$dir/links.txt"
+    [[ ${#links[@]} == ${#kinds[@]} ]] || fail '五协议链接文件不完整'
+    link=${links[i]}
+    if [[ $kind == vmess ]]; then
+        [[ $link == vmess://* ]] || fail 'VMess 链接格式无效'
+        links[i]=$(printf '%s\n' "${link#vmess://}" | jq -Rer --arg old "$old_port" --arg port "$new_port" '
+            @base64d | fromjson | if (.port | tostring) == $old then .port=$port else error("端口不一致") end |
+            "vmess://" + (tojson | @base64)')
+    else
+        type=$kind
+        case "$kind" in reality) type=vless ;; hy2) type=hysteria2 ;; esac
+        authority=${link%%\?*}
+        [[ $link == "$type://"*"?"* && ${authority##*:} == "$old_port" ]] || fail '分享链接的协议或端口不一致'
+        links[i]="${authority%:*}:$new_port?${link#*\?}"
+    fi
+    printf '%s\n' "${links[@]}" >"$scratch/port/links.txt"
+    printf '%s\n' "${links[i]}" | base64 -w0 >"$scratch/port/$kind.sub"
+    base64 -w0 "$scratch/port/links.txt" >"$scratch/port/all.sub"
+    printf '\n' >>"$scratch/port/$kind.sub"
+    printf '\n' >>"$scratch/port/all.sub"
+    files=("$config" "$dir/links.txt")
+    for label in "$kind" all; do
+        jq --arg tag "${aliases[i]}" --arg legacy "$kind" --argjson old "$old_port" --argjson port "$new_port" '
+            def match_node: .tag == $tag or .tag == $legacy;
+            if ([.outbounds[] | select(match_node and .server_port == $old)] | length) != 1 then
+                error("客户端配置端口不一致")
+            else .outbounds |= map(if match_node then .server_port=$port else . end) end
+        ' "$dir/$label.json" >"$scratch/port/$label.json"
+        check "$scratch/port/$label.json"
+        for ext in json sub; do
+            files+=("$dir/$label.$ext")
+            file="$profiles/five/$label.$ext"
+            if [[ -f $file ]]; then
+                domain=$(jq -er '.inbounds[] | select(.type=="vmess") | .tls.server_name' "$config")
+                valid_domain "$domain"
+                auth_required "$domain" "/profiles/five/$label.$ext"
+                files+=("$file")
+            fi
+        done
+    done
+
+    local backup
+    backup=$(mktemp -d "$(dirname -- "$config")/port-before.XXXXXX")
+    printf '%s\n' "${files[@]}" >"$backup/paths"
+    for i in "${!files[@]}"; do private_put "$backup/$i" <"${files[i]}"; done
+    port_paths=("${files[@]}")
+    port_backup=$backup
+    private_put "$config" <"$scratch/port/config.json"
+    restart_managed "$five" || fail '新端口启动或监听检查失败，正在回退'
+    for file in "${files[@]:1}"; do
+        put_port_file "$file" <"$scratch/port/${file##*/}" || fail '更新客户端配置失败，正在回退'
+    done
+    port_backup=''
+    printf '%s 端口已从 %s 改为 %s/%s。备份位于 %s\n' "$kind" "$old_port" "$new_port" "$transport" "$backup"
+    echo '请放行新端口，从客户端重新导入受影响的节点并复测。'
+    if [[ $kind == reality ]]; then
+        echo '若订阅使用 REALITY 入口，请在 3 → 7 查看并更新订阅地址。'
+    fi
+}
+
 print_link() { printf '%s%s%s\n' "$yellow" "$1" "$reset"; }
 
 brand_five_json() {
@@ -892,6 +1001,7 @@ JC
   hopping FIRST LAST
   five DOMAIN IP [--ports P1,P2,P3,P4,P5] [--uuid UUID] [--template FILE]
   five-share [--publish]
+  five-port PROTOCOL PORT
 HELP
 }
 
@@ -934,6 +1044,7 @@ case "$command_name" in
     five-share)
         [[ $# == 0 || ( $# == 1 && $1 == --publish ) ]] || fail '用法 five-share [--publish]'
         five_share "$@";;
+    five-port) [[ $# == 2 ]] || fail '用法 five-port PROTOCOL PORT'; change_five_port "$@";;
     five|publish|export)
         host=${1:-}; arg=${2:-}; port_text=''; uuid_text=''; range=''
         case "$command_name" in

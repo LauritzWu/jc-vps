@@ -24,7 +24,7 @@ for file in manager.sh client-template.json; do
     curl -4 -fsSL --retry 2 --connect-timeout 8 --max-time 25 "$source_url/$file" -o "$dir/$file"
 done
 (cd "$dir" && sha256sum -c <<'SHA256'
-4ee5b267bc02bb2f8299fdb4a6d5c282060944f77b17f1aef330b0fbb2cfa41f  manager.sh
+68bf754364de32849f916323c2938fbfcd6bb025fbdceaccbb3f2f71134d4e19  manager.sh
 d96d8e1440c7b53ef47625820c77fe58c95a4ff0cef1f989d68c53ff099a7d7b  client-template.json
 SHA256
 )
@@ -505,18 +505,35 @@ vps_summary() {
 }
 
 service_menu() {
-    local selection answer
+    local selection answer kind port
+    local port_kinds=(reality vmess hy2 tuic anytls)
     while true; do
         heading '服务管理'
         option 1 '启动或恢复五协议服务'
         option 2 '五协议设为开机启动（客户端验收后）'
         option 3 '启动已有 REALITY / HY2 主备'
         option 4 '已有主备设为开机启动（客户端验收后）'
+        option 5 '更换单个五协议节点的端口'
         choose 1
         case "$selection" in
             0) return ;;
             1) systemctl start "$five_service" && echo '五协议服务已启动。' ;;
             3) systemctl start sing-box-reality sing-box-hy2 && echo '现有主备已启动。' ;;
+            5)
+                heading '选择要换端口的协议'
+                option 1 'REALITY (TCP)'
+                option 2 'VMess WS (TCP)'
+                option 3 'Hysteria 2 (UDP)'
+                option 4 'TUIC (UDP)'
+                option 5 'AnyTLS (TCP)'
+                choose 0
+                [[ $selection == [1-5] ]] || continue
+                kind=${port_kinds[selection-1]}
+                read -r -p '新端口（0 返回）：' port </dev/tty || return
+                [[ $port != 0 ]] || continue
+                printf '请先在云防火墙放行新端口。应用时五协议服务会短暂重启。\n'
+                read -r -p '确认切换端口？[y/N] ' answer </dev/tty || return
+                if [[ $answer == [yY] ]]; then duo five-port "$kind" "$port" || true; fi ;;
             2|4)
                 local services=("$five_service")
                 if [[ $selection == 4 ]]; then services=(sing-box-reality sing-box-hy2); fi
