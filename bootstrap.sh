@@ -243,56 +243,33 @@ choose() {
     selection=${selection:-$1}
 }
 
-node_links() {
-    local links link
-    links=$(duo links) || return 1
-    printf '%s每条链接及其二维码均含凭据，请勿截图或转发。%s\n' "$yellow" "$reset"
-    while IFS= read -r link; do
-        heading "${link##*#}"
-        printf '%s%s%s\n' "$yellow" "$link" "$reset"
-        if command -v qrencode >/dev/null; then
-            printf '%s' "$link" | qrencode -t ANSIUTF8 -m 2 || return 1
-        fi
-    done <<< "$links"
-    if ! command -v qrencode >/dev/null; then
-        echo '需要终端二维码时，请在客户端子菜单选 5 安装 qrencode。'
-    fi
-}
-
 client_menu() {
+    local ip default_option
     while true; do
-        heading '客户端配置与验收'
-        option 1 '显示两条独立的导入链接和二维码'
-        option 2 '导出 sing-box JSON（固定 IPv4）'
-        option 3 '发布或更新 HTTPS 订阅'
-        option 4 '查看客户端验收步骤'
-        option 5 '安装终端二维码工具 qrencode'
-        option 6 '查看五协议节点链接和二维码'
-        option 7 '发布五协议单节点及聚合订阅'
-        local default_option=4
-        if [[ -s /etc/$five_service/profiles/links.txt ]]; then default_option=6; fi
+        heading '客户端与订阅'
+        option 1 '查看五协议节点链接和二维码'
+        option 2 '发布五协议单节点及聚合订阅'
+        option 3 '查看五协议客户端验收步骤'
+        option 4 '旧双协议：导出 sing-box JSON（固定 IPv4）'
+        option 5 '旧双协议：发布或更新 HTTPS 订阅'
+        default_option=3
+        if [[ -s /etc/$five_service/profiles/links.txt ]]; then default_option=1; fi
         choose "$default_option"
         case "$selection" in
             0) return ;;
-            1) node_links || echo '请先部署主备并确认配置文件存在。' ;;
-            2|3)
+            1) duo five-share || echo '请先完成五协议安装。' ;;
+            2) duo five-share --publish || echo '发布未完成，请检查上方信息。' ;;
+            3) printf '%s\n' '导入五协议节点链接，或将 sing-box JSON 导入客户端。' \
+                   '逐条切换为活动节点并打开网页，确认连接和出口地址。' \
+                   '实测通过后，可在「服务管理」启用五协议开机启动。' ;;
+            4|5)
                 read -r -p '请输入 VPS 公网 IPv4（0 返回）：' ip </dev/tty || return
                 [[ "$ip" == 0 ]] && continue
-                if [[ "$selection" == 2 ]]; then
+                if [[ "$selection" == 4 ]]; then
                     duo export "$ip" "$HOME/jc-client-$(date +%s).json" || true
                 else
                     duo publish "$ip" || true
                 fi ;;
-            4) printf '%s\n' '在 v2rayN 从剪贴板导入两条链接，或把导出的 JSON 导入 sing-box。' \
-                   '逐条选中节点并打开境外网页，再查询出口 IPv4。两条都应显示 VPS 的公网 IPv4。' \
-                   '实测通过后，在「安装与部署」选 4 设置主备开机启动。' ;;
-            5)
-                read -r -p '用 APT 安装 qrencode？[Y/N] ' answer </dev/tty || return
-                if [[ "$answer" == y || "$answer" == Y ]]; then
-                    apt-get install -y qrencode || true
-                fi ;;
-            6) duo five-share || echo '请先完成五协议安装。' ;;
-            7) duo five-share --publish || echo '发布未完成，请检查上方信息。' ;;
             *) echo '无效选项。' ;;
         esac
     done
