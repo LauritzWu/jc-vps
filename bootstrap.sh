@@ -124,7 +124,8 @@ quick_install() {
                 [1-7]) reality_target=${reality_targets[selection-1]} ;;
                 *) echo '无效选项。'; return 1 ;;
             esac
-            printf 'REALITY 目标 %s。其余协议和 HTTPS 订阅仍需要你的域名。\n' "$reality_target"
+            printf 'REALITY 握手目标 %s:443 · REALITY SNI %s\n' "$reality_target" "$reality_target"
+            echo 'REALITY 的目标和 SNI 已选好。接下来请输入你自己的域名，用于另外四个协议的 TLS 证书和 HTTPS 订阅。'
             ;;
         *) echo '无效选项。'; return 1 ;;
     esac
