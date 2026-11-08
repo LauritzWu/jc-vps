@@ -29,3 +29,5 @@ jobs:
           sed -nE '/^[0-9a-f]{64}  (manager\.sh|client-template\.json)$/p' bootstrap.sh > /tmp/jc.sha256
           test "$(cut -c67- /tmp/jc.sha256 | sort)" = "$(printf '%s\n' client-template.json manager.sh)"
           sha256sum --strict --check /tmp/jc.sha256
+      - name: Simulate package update and rollback
+        run: bash tests/upgrade.sh

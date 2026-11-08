@@ -24,7 +24,7 @@ for file in manager.sh client-template.json; do
     curl -4 -fsSL --retry 2 --connect-timeout 8 --max-time 25 "$source_url/$file" -o "$dir/$file"
 done
 (cd "$dir" && sha256sum -c <<'SHA256'
-2e27cc57fd8ba5c5889bb95ecdde43fd50a38a44a7738b5c560937b6453b2b8e  manager.sh
+43a080ee4a75afee3c99875dfda58b881b4ff80823aad4b6ebfdfc34ed68511c  manager.sh
 d96d8e1440c7b53ef47625820c77fe58c95a4ff0cef1f989d68c53ff099a7d7b  client-template.json
 SHA256
 )
@@ -68,7 +68,7 @@ quick_install() {
         '已有主备服务可继续运行。新五协议使用另外分配的端口。'
     heading '1/5  官方内核'
     option 1 '使用已安装的官方内核；新机安装 APT 稳定版'
-    option 2 '指定官方 APT 版本（升级或降级）'
+        option 2 '指定官方 APT 版本（运行中的 JC 服务会短暂重启）'
     choose 1
     case "$selection" in
         0) return 0 ;;
@@ -150,7 +150,7 @@ quick_install() {
     read -r -p "${yellow}开始安装？[Y/N，回车取消] $reset" answer </dev/tty || return 1
     [[ $answer == y || $answer == Y ]] || return 0
     if [[ -n $version ]]; then
-        duo packages --version "$version" || return 1
+        duo packages --restart-managed --version "$version" || return 1
     elif [[ ! -x /usr/bin/sing-box ]] || ! command -v caddy >/dev/null; then
         duo packages || return 1
     fi
@@ -291,13 +291,12 @@ core_menu() {
                 apt-cache madison sing-box || true
                 read -r -p '输入完整版本号（0 返回）：' version </dev/tty || return
                 [[ "$version" == 0 || -z "$version" ]] && continue
-                read -r -p '安装该版本（可能降级），确认？[Y/N] ' answer </dev/tty || return
-                if [[ "$answer" == y || "$answer" == Y ]]; then duo packages --version "$version" || true; fi ;;
+                read -r -p '切换版本并重启运行中的 JC 服务（连接会短暂中断）？[Y/N] ' answer </dev/tty || return
+                if [[ "$answer" == y || "$answer" == Y ]]; then duo packages --restart-managed --version "$version" || true; fi ;;
             2)
-                read -r -p '安装或升级 APT 稳定版？[Y/N] ' answer </dev/tty || return
+                read -r -p '安装或升级 APT 稳定版（运行中的 JC 服务会短暂重启）？[Y/N] ' answer </dev/tty || return
                 if [[ "$answer" == y || "$answer" == Y ]]; then
-                    duo packages || true
-                    echo '已有服务请在备用线路可用时分别重启并复测，以加载新程序。'
+                    duo packages --restart-managed || true
                 fi ;;
             *) echo '无效选项。' ;;
         esac
