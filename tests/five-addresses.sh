@@ -10,6 +10,10 @@ template="$root/client-template.json"
 ipv4=1.1.1.1
 ipv6=2606:4700::1
 ip() { [[ $* == "-6 route get $ipv6" ]]; }
+timeout() {
+    [[ $* == *'s_client -connect www.microsoft.com:443'* ]] || return 1
+    printf 'ALPN protocol: h2\n'
+}
 preflight() { cert="$test_dir/test.crt"; }
 ensure_unused() { :; }
 ss() { :; }
@@ -42,6 +46,55 @@ for host in "$ipv4" "$ipv6"; do
         jq -e --arg host "$host" '.add == $host and .sni == "example.com"' >/dev/null
     printf '%s configuration and links passed\n' "$host"
 done
+
+profiles="$test_dir/published"
+mkdir -p "$profiles/five"
+cp "$dir/profiles/"*.json "$dir/profiles/"*.sub "$profiles/five/"
+auth_required() { :; }
+put() { cat >"$1"; }
+change_five_port reality 28443
+grep -F "@[$ipv6]:28443?" "$dir/profiles/links.txt" >/dev/null
+jq -e '.inbounds[0].listen_port == 28443 and .inbounds[1].listen_port == 8444' "$dir/config.json" >/dev/null
+jq -e '.outbounds[] | select(.type == "vless") | .server_port == 28443' "$profiles/five/all.json" >/dev/null
+base64 -d "$profiles/five/all.sub" | cmp - "$dir/profiles/links.txt"
+
+rm -rf -- "$scratch/port"
+change_five_port vmess 28444
+sed -n 's/^vmess:\/\///p' "$dir/profiles/links.txt" | base64 -d |
+    jq -e --arg host "$ipv6" '.port == "28444" and .add == $host' >/dev/null
+
+rm -rf -- "$scratch/port"
+before=$(sha256sum "$dir/config.json" "$dir/profiles/links.txt" "$profiles/five/all.json")
+if (
+    trap cleanup EXIT
+    restart_managed() { [[ $(jq -r '.inbounds[2].listen_port' "$(cfg "$five")") == 8445 ]]; }
+    change_five_port hy2 28445
+) >"$test_dir/rollback.log" 2>&1; then
+    echo 'Expected restart failure'
+    exit 1
+fi
+grep -F '已恢复原监听端口和客户端配置' "$test_dir/rollback.log" >/dev/null || { cat "$test_dir/rollback.log"; exit 1; }
+[[ $(sha256sum "$dir/config.json" "$dir/profiles/links.txt" "$profiles/five/all.json") == "$before" ]]
+echo 'IPv6 URI, VMess, published profiles, and port rollback passed'
+scratch="$test_dir/scratch-external"
+mkdir "$scratch"
+five=five-external
+five_deploy example.com "$ipv4" 443,8444,8445,8446,8447 12345678-1234-1234-1234-123456789abc www.microsoft.com
+dir="$test_dir/$five"
+jq -e '
+    .inbounds[0].tls.server_name == "www.microsoft.com" and
+    .inbounds[0].tls.reality.handshake == {server:"www.microsoft.com",server_port:443} and
+    all(.inbounds[1:][]; .tls.server_name == "example.com")
+' "$dir/config.json" >/dev/null
+jq -e '
+    all(.outbounds[] | select(has("server"));
+        .tls.server_name == (if .type == "vless" then "www.microsoft.com" else "example.com" end))
+' "$dir/profiles/all.json" >/dev/null
+grep -F 'sni=www.microsoft.com&' "$dir/profiles/links.txt" | grep -F 'vless://' >/dev/null
+if (five_deploy example.com "$ipv4" 8443,8444,8445,8446,8447 12345678-1234-1234-1234-123456789abc www.microsoft.com) >/dev/null 2>&1; then
+    echo 'Accepted TCP 8443 as a node port in external REALITY mode' >&2
+    exit 1
+fi
 
 for bad in '[2606:4700::1]' '2606::::1' 'fe80::1' '::1'; do
     if (valid_node_address "$bad") >/dev/null 2>&1; then
