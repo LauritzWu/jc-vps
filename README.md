@@ -8,13 +8,13 @@
 
 ```bash
 revision=cb3f61c6a6c963d52e011af1454490b721a362a0
-s=$(curl -4fsSL -m 25 "https://raw.githubusercontent.com/LauritzWu/lauritz-duo/$revision/bootstrap.sh") &&
+s=$(curl -4fsSL -m 25 "https://raw.githubusercontent.com/LauritzWu/jc-vps/$revision/bootstrap.sh") &&
   bash -c "$s" -- "$revision"
 ```
 
-在菜单选「6 一键安装 sing-box」。其他版本的安装命令见 [GitHub Releases](https://github.com/LauritzWu/lauritz-duo/releases)。
+在菜单选「6 一键安装 sing-box」。其他版本的安装命令见 [GitHub Releases](https://github.com/LauritzWu/jc-vps/releases)。
 
-**已验收范围**为 Ubuntu 24.04 LTS 和 Debian 13，均为 x86_64、IPv4。五个协议均通过公网连通测试，两套系统也通过了公信证书签发、订阅认证、重启恢复、内核切换和失败回退，以及卸载重装。五协议也已通过公网 IPv6 连通测试，IPv6 订阅已在隔离环境验收，分享链接已通过 v2rayN 导入检查。详见 [v1.1.0 发布说明](https://github.com/LauritzWu/lauritz-duo/releases/tag/v1.1.0)。
+**已验收范围**为 Ubuntu 24.04 LTS 和 Debian 13，均为 x86_64、IPv4。五个协议均通过公网连通测试，两套系统也通过了公信证书签发、订阅认证、重启恢复、内核切换和失败回退，以及卸载重装。五协议也已通过公网 IPv6 连通测试，IPv6 订阅已在隔离环境验收，分享链接已通过 v2rayN 导入检查。详见 [v1.1.0 发布说明](https://github.com/LauritzWu/jc-vps/releases/tag/v1.1.0)。
 
 首页包含服务状态、服务管理、客户端与订阅、网络与防火墙和系统工具。支持数字选择、回车默认和子菜单按 0 返回。底部显示系统、接口地址和服务状态。服务器地区通过 ipwho.is 按 VPS 公网出口 IP 查询并缓存 24 小时。5 → 3 可手动覆盖，已保存的地区优先使用。
 
