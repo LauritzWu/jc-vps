@@ -2,17 +2,17 @@
 
 面向个人 VPS 的 sing-box 管理工具。使用官方 APT 版 sing-box，提供五协议安装向导，支持选择 IPv4 或 IPv6 节点地址，并可发布带密码的 HTTPS 订阅，并兼容已有 REALITY / Hysteria 2 主备服务。
 
-## 一键安装
+## 一键安装 v1.2.0
 
 在 VPS 的 root Bash 会话中运行。入口需要 curl。安装脚本、管理脚本、客户端模板和后续的 `jc` 命令均使用同一提交。
 
 ```bash
-revision=e5df789b90867ddc7a23cafd93ad7eeeb5912e36
+revision=27c778b721f5ae6cef9b77d78c493a209a9ee8f0
 s=$(curl -4fsSL -m 25 "https://raw.githubusercontent.com/LauritzWu/jc-vps/$revision/bootstrap.sh") &&
   bash -c "$s" -- "$revision"
 ```
 
-在菜单选「一键安装 sing-box」。此入口包含回车确认安装、安装后默认查看节点，以及改进的证书和卸载提示。已发布版本见 [GitHub Releases](https://github.com/LauritzWu/jc-vps/releases)。
+主菜单选「1 一键安装 sing-box」或直接回车。确认安装时回车继续，安装完成后回车查看节点。详见 [v1.2.0 发布说明](https://github.com/LauritzWu/jc-vps/releases/tag/v1.2.0)。
 
 **已验收范围**为 Ubuntu 24.04 LTS 和 Debian 13，均为 x86_64、IPv4。五个协议均通过公网连通测试，两套系统也通过了公信证书签发、订阅认证、重启恢复、内核切换和失败回退，以及卸载重装。五协议也已通过公网 IPv6 连通测试，IPv6 订阅已在隔离环境验收，分享链接已通过 v2rayN 导入检查。详见 [v1.1.0 发布说明](https://github.com/LauritzWu/jc-vps/releases/tag/v1.1.0)。
 
@@ -22,7 +22,7 @@ s=$(curl -4fsSL -m 25 "https://raw.githubusercontent.com/LauritzWu/jc-vps/$revis
 
 ## 卸载和重装
 
-主菜单选「完整卸载」后，输入 `1` 确认，输入 `0` 或直接回车取消。确认后会停止 JC 服务、移除官方软件包，并删除 JC 节点配置、凭据、订阅文件和快捷命令。Caddy 网站及订阅路由定义、证书、防火墙和手动保存的备份会保留。重新安装时请使用上面的一键命令。
+主菜单选「2 完整卸载 sing-box 和 JC」后，输入 `1` 确认，输入 `0` 或直接回车取消。确认后会停止 JC 服务、移除官方软件包，并删除 JC 节点配置、凭据、订阅文件和快捷命令。Caddy 网站及订阅路由定义、证书、防火墙和手动保存的备份会保留。重新安装时请使用上面的一键命令。
 
 ## 已搭好主备的 VPS
 
@@ -40,7 +40,9 @@ publish 使用随附的无凭据模板，从现有 /etc/sing-box-reality 和 /et
 ## 五协议节点与订阅
 
 - 协议为 REALITY、VMess WS + TLS、Hysteria 2、TUIC 和 AnyTLS。可随机选端口，也可指定五个端口。随机检查本机监听，云防火墙还需单独放行。UUID 可生成或指定，三种密码型协议各自生成密码。
-- 在「客户端与订阅」可以查看五条链接和二维码。也可发布六份 sing-box JSON 和六份 Base64 链接订阅，含单节点和聚合版本。订阅通过五协议的 REALITY TCP 端口访问，使用 HTTPS Basic Auth。
+- 在「客户端与订阅」选 1 查看五条链接和二维码，选 2 发布单节点和聚合订阅。订阅提供 sing-box JSON 和 Base64 链接格式，使用 HTTPS Basic Auth。
+- REALITY 默认使用自有域名，也可选择七个预置的外部握手目标。选外部目标时，该域名仅用于 REALITY 握手和 SNI，其余四个协议的 TLS 证书和 HTTPS 订阅仍需自有域名。自有目标模式使用 REALITY TCP 端口访问订阅，外部目标模式使用 TCP 8443，后者的公网订阅仍待端到端验收。
+- 在「服务管理 → 更换单个五协议节点的端口」可单独换端口。脚本会备份配置并在应用失败时尝试回滚。先放行新端口，再重新导入受影响的节点并复测。
 - 在「网络与防火墙」可按 TCP/UDP 放行指定端口或范围；全开只对已启用的本机 UFW 生效，需手动输入 OPEN-ALL 确认。回退可用 ufw status numbered 找到 JC open all 规则，再用 ufw delete 编号移除。
 - 在「系统工具 → 查看或更新官方内核」可选择官方 APT 候选版本或指定仓库版本。切换前会下载当前版本作为回退包。运行中的 JC 服务会短暂重启。若安装、配置校验或监听检查失败，脚本会尝试恢复原版本及服务。恢复失败时会显示保留的安装包路径。切换后请用客户端复测。
 
