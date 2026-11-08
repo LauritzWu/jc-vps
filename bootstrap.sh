@@ -24,7 +24,7 @@ for file in manager.sh client-template.json; do
     curl -4 -fsSL --retry 2 --connect-timeout 8 --max-time 25 "$source_url/$file" -o "$dir/$file"
 done
 (cd "$dir" && sha256sum -c <<'SHA256'
-69989931f0e7f80061e5ef64530e36c1271d20a5880cd75de2450216deb07180  manager.sh
+4ee5b267bc02bb2f8299fdb4a6d5c282060944f77b17f1aef330b0fbb2cfa41f  manager.sh
 d96d8e1440c7b53ef47625820c77fe58c95a4ff0cef1f989d68c53ff099a7d7b  client-template.json
 SHA256
 )
@@ -653,7 +653,12 @@ while true; do
         6)
             quick_install || echo '安装未完成，请查看上面的报错。'
             pause_menu ;;
-        7) if duo uninstall; then exit 0; fi ;;
+        7)
+            if duo uninstall; then
+                printf '\n%s\n' '如需装回本次运行的版本，请复制下面两行。' "revision=$revision" \
+                    's=$(curl -4fsSL -m 25 "https://raw.githubusercontent.com/LauritzWu/jc-vps/$revision/bootstrap.sh") && bash -c "$s" -- "$revision"'
+                exit 0
+            fi ;;
         0) exit 0 ;;
         *) printf '%s\n' '无效选项。' >&2 ;;
     esac

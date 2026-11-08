@@ -237,7 +237,8 @@ uninstall() {
     rm -rf -- "${dirs[@]}"
     if (( ${#files[@]} )); then rm -f -- "${files[@]}"; fi
     systemctl daemon-reload
-    printf '%sJC 已完整卸载。%s 重新使用时请运行 GitHub 上的一键命令。\n' "$green" "$reset"
+    printf '%sJC 已完整卸载。%s\n' "$green" "$reset"
+    printf '重新安装请访问 https://github.com/LauritzWu/jc-vps/releases/latest\n'
 }
 site() {
     local first_line
