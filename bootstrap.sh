@@ -24,7 +24,7 @@ for file in manager.sh client-template.json; do
     curl -4 -fsSL --retry 2 --connect-timeout 8 --max-time 25 "$source_url/$file" -o "$dir/$file"
 done
 (cd "$dir" && sha256sum -c <<'SHA256'
-68bf754364de32849f916323c2938fbfcd6bb025fbdceaccbb3f2f71134d4e19  manager.sh
+dc07b5b339c993968bf0bf51dbafa5d1b21807fbe49a3622ce83472cfa053473  manager.sh
 d96d8e1440c7b53ef47625820c77fe58c95a4ff0cef1f989d68c53ff099a7d7b  client-template.json
 SHA256
 )
@@ -83,7 +83,7 @@ quick_install() {
     local selection port_mode index
     local transports=(tcp tcp udp udp tcp)
     if [[ -e /etc/$five_service/config.json || -e /etc/systemd/system/$five_service.service ]]; then
-        echo '已检测到五协议配置。请到 2 管理服务，或到 3 查看节点与订阅。'
+        echo '已检测到五协议配置。请到 4 管理服务，或到 5 查看节点与订阅。'
         return 0
     fi
 
@@ -195,7 +195,7 @@ quick_install() {
     fi
     duo five "$domain" "$ip" --ports "$ports" --uuid "$uuid" || return 1
     printf '\n%s五协议安装成功 · 本机监听已确认%s\n' "$green" "$reset"
-    echo '请在云防火墙放行上面列出的 TCP/UDP 端口。外网验收通过后，在主菜单 2 启用开机启动。'
+    echo '请在云防火墙放行上面列出的 TCP/UDP 端口。外网验收通过后，在主菜单 4 启用开机启动。'
     option 1 '查看五条节点链接和二维码（含凭据）'
     option 2 '稍后在客户端与订阅菜单查看'
     choose 1
@@ -645,37 +645,37 @@ while true; do
     width=$(home_width)
     home_banner "$width"
     heading '管理菜单'
-    option 1 '服务状态'
-    option 2 '服务管理'
-    option 3 '客户端与订阅'
-    option 4 '网络与防火墙'
-    option 5 '系统工具'
-    option 6 '一键安装 sing-box' "$green"
-    option 7 '完整卸载 JC' "$red"
+    option 1 '一键安装 sing-box' "$green"
+    option 2 '完整卸载 sing-box 和 JC' "$red"
+    option 3 '服务状态'
+    option 4 '服务管理'
+    option 5 '客户端与订阅'
+    option 6 '网络与防火墙'
+    option 7 '系统工具'
     option 0 '退出'
     home_rule "$width"
     vps_summary
     if [[ ! -s /etc/$five_service/config.json &&
         ! -s /etc/sing-box-reality/config.json && ! -s /etc/sing-box-hy2/config.json ]]; then
-        printf '%s尚未部署 JC 节点，请先选择 6 安装。%s\n' "$yellow" "$reset"
+        printf '%s尚未部署 JC 节点，请先选择 1 安装。%s\n' "$yellow" "$reset"
     fi
     home_rule "$width"
-    read -r -p "${yellow}请选择 [回车默认 1，0 退出]：$reset" selection </dev/tty || exit 1
+    read -r -p "${yellow}请选择 [回车默认 1 安装，0 退出]：$reset" selection </dev/tty || exit 1
     case "${selection:-1}" in
-        1) duo status || true ;;
-        2) service_menu ;;
-        3) client_menu ;;
-        4) network_menu ;;
-        5) tools_menu ;;
-        6)
+        1)
             quick_install || echo '安装未完成，请查看上面的报错。'
             pause_menu ;;
-        7)
+        2)
             if duo uninstall; then
                 printf '\n%s\n' '如需装回本次运行的版本，请复制下面两行。' "revision=$revision" \
                     's=$(curl -4fsSL -m 25 "https://raw.githubusercontent.com/LauritzWu/jc-vps/$revision/bootstrap.sh") && bash -c "$s" -- "$revision"'
                 exit 0
             fi ;;
+        3) duo status || true ;;
+        4) service_menu ;;
+        5) client_menu ;;
+        6) network_menu ;;
+        7) tools_menu ;;
         0) exit 0 ;;
         *) printf '%s\n' '无效选项。' >&2 ;;
     esac

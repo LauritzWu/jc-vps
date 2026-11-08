@@ -860,7 +860,7 @@ change_five_port() {
     printf '%s 端口已从 %s 改为 %s/%s。备份位于 %s\n' "$kind" "$old_port" "$new_port" "$transport" "$backup"
     echo '请放行新端口，从客户端重新导入受影响的节点并复测。'
     if [[ $kind == reality ]]; then
-        echo '若订阅使用 REALITY 入口，请在 3 → 7 查看并更新订阅地址。'
+        echo '若订阅使用 REALITY 入口，请在「客户端与订阅」→「发布五协议单节点及聚合订阅」查看并更新订阅地址。'
     fi
 }
 
