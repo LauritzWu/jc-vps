@@ -24,7 +24,7 @@ for file in manager.sh client-template.json; do
     curl -4 -fsSL --retry 2 --connect-timeout 8 --max-time 25 "$source_url/$file" -o "$dir/$file"
 done
 (cd "$dir" && sha256sum -c <<'SHA256'
-dc07b5b339c993968bf0bf51dbafa5d1b21807fbe49a3622ce83472cfa053473  manager.sh
+f0adb7c6ba87b7c313a24d9e2d1565ec2bf18258370bfd6a5de3d995d459d57d  manager.sh
 d96d8e1440c7b53ef47625820c77fe58c95a4ff0cef1f989d68c53ff099a7d7b  client-template.json
 SHA256
 )
@@ -68,7 +68,7 @@ wait_for_certificate() {
         fi
         sleep 1
     done
-    printf '%s%s%s\n' "$red" '证书暂未就绪。请核对域名 A/AAAA 记录和公网 TCP 80。修正后选 6 重试。' "$reset" >&2
+    printf '%s%s%s\n' "$red" '证书暂未就绪。请核对域名 A/AAAA 记录和公网 TCP 80。修正后选 1 重试。' "$reset" >&2
     logs=$(journalctl -u caddy --since "@$started" --no-pager -o cat 2>/dev/null | grep -F -- "$domain" | tail -n 8 || true)
     if [[ -z $logs ]]; then
         logs=$(journalctl -u caddy -n 8 --no-pager -o cat 2>/dev/null || true)
@@ -78,7 +78,8 @@ wait_for_certificate() {
 }
 
 quick_install() {
-    local domain ip ports='' uuid version='' answer detected port protocol resolved started
+    local domain ip ports='' uuid version='' answer detected port protocol resolved started reality_target='' target_index
+    local reality_targets=(aws.amazon.com www.microsoft.com www.cloudflare.com www.amazon.com dl.google.com www.samsung.com www.intel.com)
     local protocol_ports=() protocol_labels=('VLESS / REALITY (TCP)' 'VMess WS (TCP)' 'Hysteria 2 (UDP)' 'TUIC (UDP)' 'AnyTLS (TCP)')
     local selection port_mode index
     local transports=(tcp tcp udp udp tcp)
@@ -106,6 +107,28 @@ quick_install() {
         *) echo '无效选项。'; return 1 ;;
     esac
     heading '2/5  域名和证书'
+    option 1 '使用自己的域名作为 REALITY 目标'
+    option 2 '从常用站点选择 REALITY 目标'
+    choose 1
+    case "$selection" in
+        0) return 0 ;;
+        1) ;;
+        2)
+            heading 'REALITY 握手目标'
+            for target_index in "${!reality_targets[@]}"; do
+                option "$((target_index + 1))" "${reality_targets[target_index]}"
+            done
+            choose 0
+            case "$selection" in
+                0) return 0 ;;
+                [1-7]) reality_target=${reality_targets[selection-1]} ;;
+                *) echo '无效选项。'; return 1 ;;
+            esac
+            printf 'REALITY 握手目标 %s:443 · REALITY SNI %s\n' "$reality_target" "$reality_target"
+            echo 'REALITY 的目标和 SNI 已选好。接下来请输入你自己的域名，用于另外四个协议的 TLS 证书和 HTTPS 订阅。'
+            ;;
+        *) echo '无效选项。'; return 1 ;;
+    esac
     detected=$(jq -r '.inbounds[0].tls.server_name // empty' /etc/sing-box-reality/config.json 2>/dev/null || true)
     read -r -p "站点域名${detected:+ [回车使用 $detected]}（0 返回）：" domain </dev/tty || return 1
     [[ $domain != 0 ]] || return 0
@@ -167,6 +190,9 @@ quick_install() {
     printf '已确认 UUID：%s%s%s\n' "$green" "$uuid" "$reset"
     heading '5/5  确认安装'
     printf '域名 %s · 节点地址 %s\n' "$domain" "$ip"
+    if [[ -n $reality_target ]]; then
+        printf 'REALITY 目标 %s:443。HTTPS 订阅发布后使用自有域名的 TCP 8443。\n' "$reality_target"
+    fi
     for protocol in "${!protocol_labels[@]}"; do
         port=${protocol_ports[protocol]}
         printf '  %s：%s%s%s\n' "${protocol_labels[protocol]}" "$yellow" "$port" "$reset"
@@ -193,7 +219,9 @@ quick_install() {
     else
         echo 'Caddy 公信证书已就绪，继续安装。'
     fi
-    duo five "$domain" "$ip" --ports "$ports" --uuid "$uuid" || return 1
+    local target_args=()
+    if [[ -n $reality_target ]]; then target_args=(--reality-target "$reality_target"); fi
+    duo five "$domain" "$ip" --ports "$ports" --uuid "$uuid" "${target_args[@]}" || return 1
     printf '\n%s五协议安装成功 · 本机监听已确认%s\n' "$green" "$reset"
     echo '请在云防火墙放行上面列出的 TCP/UDP 端口。外网验收通过后，在主菜单 4 启用开机启动。'
     option 1 '查看五条节点链接和二维码（含凭据）'

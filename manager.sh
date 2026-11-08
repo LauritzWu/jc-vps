@@ -507,7 +507,7 @@ real_metadata() {
 }
 reality_uri() {
     printf 'vless://%s@%s:%s?encryption=none&security=reality&sni=%s&fp=chrome&pbk=%s&sid=%s&type=tcp&flow=xtls-rprx-vision#%s\n' \
-        "$1" "$2" "$3" "$domain" "$public" "$4" "$5"
+        "$1" "$2" "$3" "${6:-$domain}" "$public" "$4" "$5"
 }
 dual_links() {
     local domain public user short password rport hport
@@ -657,10 +657,16 @@ pick_port() {
 
 five_deploy() {
     local domain=$1 host=$2 ports_text=$3 user=$4 cert private public short ws hp tp ap i port flag rows label
+    local reality_target=${5:-} reality_name=$1 handshake_host=127.0.0.1 handshake_port=8443 tls_probe
     local listen=0.0.0.0 uri_host=$2
     local ports=() listeners=() used=' ' dir
     dir="$(dirname -- "$(cfg "$five")")/profiles"
     valid_node_address "$host"
+    if [[ -n $reality_target ]]; then
+        valid_domain "$reality_target"
+        [[ $reality_target != "$domain" ]] || fail '自有域名请使用本机 REALITY 目标'
+        reality_name=$reality_target handshake_host=$reality_target handshake_port=443
+    fi
     if [[ $host == *:* ]]; then
         listen=::
         uri_host="[$host]"
@@ -670,6 +676,15 @@ five_deploy() {
     if [[ -z $user ]]; then user=$(cat /proc/sys/kernel/random/uuid); fi
     [[ $user =~ ^[a-fA-F0-9]{8}(-[a-fA-F0-9]{4}){3}-[a-fA-F0-9]{12}$ ]] || fail 'UUID 格式无效'
     parse_five_ports "$ports_text"
+    if [[ -n $reality_target ]]; then
+        for i in 0 1 4; do
+            [[ ${ports[i]} != 8443 ]] || fail 'TCP 8443 预留给自有域名的 HTTPS 订阅'
+        done
+        tls_probe=$(timeout 8 openssl s_client -connect "$reality_target:443" -servername "$reality_target" \
+            -verify_hostname "$reality_target" -verify_return_error -tls1_3 -alpn h2 </dev/null 2>/dev/null) ||
+            fail "VPS 无法与 $reality_target 建立可信的 TLS 1.3 连接，请换一个目标"
+        [[ $tls_probe == *'ALPN protocol: h2'* ]] || fail "$reality_target 未协商 HTTP/2，请换一个目标"
+    fi
     for i in "${!kinds[@]}"; do
         flag=-lnt
         [[ ${protocols[i]} == udp ]] && flag=-lnu
@@ -691,23 +706,25 @@ five_deploy() {
     jq -n --args '$ARGS.positional | map(tonumber)' "${ports[@]}" >"$scratch/ports.json"
     DUO_UUID=$user DUO_KEY=$private DUO_SID=$short DUO_WS=$ws DUO_HP=$hp DUO_TP=$tp DUO_AP=$ap \
     jq -n --slurpfile ports "$scratch/ports.json" --arg domain "$domain" --arg host "$host" --arg listen "$listen" \
-        --arg pub "$public" --arg cert "$cert" --arg certkey "${cert%.crt}.key" '
+        --arg pub "$public" --arg cert "$cert" --arg certkey "${cert%.crt}.key" \
+        --arg reality_name "$reality_name" --arg handshake_host "$handshake_host" --argjson handshake_port "$handshake_port" '
       $ENV.DUO_UUID as $uuid | $ENV.DUO_KEY as $key | $ENV.DUO_SID as $sid | $ENV.DUO_WS as $ws |
       $ENV.DUO_HP as $hp | $ENV.DUO_TP as $tp | $ENV.DUO_AP as $ap |
       {enabled:true,server_name:$domain} as $tls |
+      ($tls+{server_name:$reality_name}) as $reality_tls |
       ($tls+{certificate_path:$cert,key_path:$certkey}) as $cert_tls |
       {type:"ws",path:$ws} as $transport |
       {uuid:$uuid,flow:"xtls-rprx-vision"} as $vision |
       [
-        {type:"vless",users:[$vision],tls:($tls+{reality:{enabled:true,private_key:$key,
-          short_id:[$sid],handshake:{server:"127.0.0.1",server_port:8443}}})},
+        {type:"vless",users:[$vision],tls:($reality_tls+{reality:{enabled:true,private_key:$key,
+          short_id:[$sid],handshake:{server:$handshake_host,server_port:$handshake_port}}})},
         {type:"vmess",users:[{uuid:$uuid}],transport:$transport,tls:$cert_tls},
         {type:"hysteria2",users:[{password:$hp}],tls:$cert_tls},
         {type:"tuic",users:[{uuid:$uuid,password:$tp}],tls:($cert_tls+{alpn:["h3"]})},
         {type:"anytls",users:[{password:$ap}],tls:$cert_tls}
       ] as $ins |
       [
-        ({type:"vless",tls:($tls+{utls:{enabled:true,fingerprint:"chrome"},
+        ({type:"vless",tls:($reality_tls+{utls:{enabled:true,fingerprint:"chrome"},
           reality:{enabled:true,public_key:$pub,short_id:$sid}})}+$vision),
         {type:"vmess",uuid:$uuid,security:"auto",alter_id:0,transport:$transport,tls:$tls},
         {type:"hysteria2",password:$hp,tls:$tls},
@@ -721,7 +738,7 @@ five_deploy() {
     jq '.ins' "$scratch/five.json" | server_doc >"$scratch/server.json"
     check "$scratch/server.json"
     {
-        reality_uri "$user" "$uri_host" "${ports[0]}" "$short" JC-VLESS
+        reality_uri "$user" "$uri_host" "${ports[0]}" "$short" JC-VLESS "$reality_name"
         printf 'vmess://'
         DUO_UUID=$user DUO_WS=$ws jq -cn --arg host "$host" --arg port "${ports[1]}" --arg sni "$domain" \
             '{v:"2",ps:"JC-VMESS",add:$host,port:$port,id:$ENV.DUO_UUID,aid:"0",scy:"auto",net:"ws",
@@ -796,6 +813,10 @@ change_five_port() {
     jq -e --argjson port "$new_port" 'all(.inbounds[]; .listen_port != $port)' "$config" >/dev/null ||
         fail '其他 JC 节点已使用该端口'
     transport=${protocols[i]}
+    if [[ $transport == tcp && $new_port == 8443 ]] &&
+        jq -e '.inbounds[0].tls.reality.handshake.server != "127.0.0.1"' "$config" >/dev/null; then
+        fail 'TCP 8443 预留给自有域名的 HTTPS 订阅'
+    fi
     flag=-lnt
     if [[ $transport == udp ]]; then flag=-lnu; fi
     rows=$(ss -H "$flag" "( sport = :$new_port )")
@@ -923,11 +944,13 @@ show_qr() {
 
 five_share() {
     local domain hash auth port url dir="/etc/$five/profiles" prefix=/profiles/five
-    local i=0 link label ext
-    domain=$(jq -er '.inbounds[0].tls.server_name' "$(cfg "$five")")
+    local i=0 link label ext handshake external=false
+    domain=$(jq -er '.inbounds[] | select(.type=="vmess") | .tls.server_name' "$(cfg "$five")")
     valid_domain "$domain"
     port=$(jq -er '.inbounds[0].listen_port' "$(cfg "$five")")
     port_number "$port" || fail 'REALITY 端口无效'
+    handshake=$(jq -er '.inbounds[0].tls.reality.handshake.server' "$(cfg "$five")")
+    if [[ $handshake != 127.0.0.1 ]]; then external=true; port=8443; fi
     url="https://$domain"
     if [[ $port != 443 ]]; then url+=":$port"; fi
     refresh_five_aliases "$dir"
@@ -965,6 +988,18 @@ CADDY
                 put "$profiles/five/$label.$ext" 640 caddy <"$dir/$label.$ext"
             done
         done
+        if $external; then
+            block=$(site_block "$domain")
+            if grep -Eq '^[[:space:]]+bind[[:space:]]+127\.0\.0\.1[[:space:]]*$' <<<"$block"; then
+                awk -v marker="$domain:8443 {" '
+                  $0 == marker {inside=1} inside && /^}/ {inside=0}
+                  inside && /^[[:space:]]+bind[[:space:]]+127\.0\.0\.1[[:space:]]*$/ {next}
+                  {print}
+                ' "$caddyfile" >"$scratch/Caddyfile"
+                reload_site "$scratch/Caddyfile"
+            fi
+            echo '请在云防火墙放行 TCP 8443，并从外网验证 HTTPS 订阅。'
+        fi
     fi
     printf '%s链接和二维码含节点凭据，请勿公开分享。%s\n' "$yellow" "$reset"
     while IFS= read -r link; do
@@ -999,7 +1034,7 @@ JC
   publish IPV4 [--template FILE] [--hop-range START:END]
   rules SERVICE
   hopping FIRST LAST
-  five DOMAIN IP [--ports P1,P2,P3,P4,P5] [--uuid UUID] [--template FILE]
+  five DOMAIN IP [--ports P1,P2,P3,P4,P5] [--uuid UUID] [--reality-target DOMAIN] [--template FILE]
   five-share [--publish]
   five-port PROTOCOL PORT
 HELP
@@ -1046,7 +1081,7 @@ case "$command_name" in
         five_share "$@";;
     five-port) [[ $# == 2 ]] || fail '用法 five-port PROTOCOL PORT'; change_five_port "$@";;
     five|publish|export)
-        host=${1:-}; arg=${2:-}; port_text=''; uuid_text=''; range=''
+        host=${1:-}; arg=${2:-}; port_text=''; uuid_text=''; range=''; reality_target=''
         case "$command_name" in
             five|export) [[ $# -ge 2 ]] || fail '缺少位置参数'; shift 2;;
             publish) [[ $# -ge 1 ]] || fail '缺少 VPS IPv4'; shift;;
@@ -1057,12 +1092,13 @@ case "$command_name" in
                 *:--template) template=$2;;
                 five:--ports) port_text=$2;;
                 five:--uuid) uuid_text=$2;;
+                five:--reality-target) reality_target=$2;;
                 export:--hop-range|publish:--hop-range) range=$2;;
                 *) fail "未知参数 $1";;
             esac
             shift 2
         done
-        if [[ $command_name == five ]]; then five_deploy "$host" "$arg" "$port_text" "$uuid_text"
+        if [[ $command_name == five ]]; then five_deploy "$host" "$arg" "$port_text" "$uuid_text" "$reality_target"
         else
             domain='' public=''
             sync_profile "$host" "$range"
