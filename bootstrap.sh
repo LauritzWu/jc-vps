@@ -24,7 +24,7 @@ for file in manager.sh client-template.json; do
     curl -4 -fsSL --retry 2 --connect-timeout 8 --max-time 25 "$source_url/$file" -o "$dir/$file"
 done
 (cd "$dir" && sha256sum -c <<'SHA256'
-1feb624a586c2b589a4a05ced3c8f1971404d38975fd9449c9cec586c17aaa63  manager.sh
+69989931f0e7f80061e5ef64530e36c1271d20a5880cd75de2450216deb07180  manager.sh
 d96d8e1440c7b53ef47625820c77fe58c95a4ff0cef1f989d68c53ff099a7d7b  client-template.json
 SHA256
 )
@@ -38,22 +38,47 @@ pause_menu() {
     read -r -p '按回车返回菜单：' </dev/tty || true
 }
 
+certificate_ready() {
+    curl -s --noproxy '*' --max-time 2 \
+        --resolve "$1:8443:127.0.0.1" "https://$1:8443/" -o /dev/null
+}
+
 wait_for_certificate() {
-    local domain=$1 attempt
+    local domain=$1 started=$2 deadline=$((SECONDS + 90)) next_update=$((SECONDS + 15))
+    local logs listeners
+    if certificate_ready "$domain"; then
+        echo 'Caddy 公信证书已就绪。'
+        return 0
+    fi
+    listeners=$(ss -H -lnt '( sport = :80 )') || return 1
+    if [[ -z $listeners ]]; then
+        printf '%s%s%s\n' "$red" '本机 TCP 80 未监听，Caddy 无法处理 HTTP 签发验证。' "$reset" >&2
+        return 1
+    fi
     echo '正在等待 Caddy 公信证书（最多约 90 秒）…'
-    for ((attempt=1; attempt<=15; attempt++)); do
-        if curl -fs --noproxy '*' --max-time 3 \
-            --resolve "$domain:8443:127.0.0.1" "https://$domain:8443/" -o /dev/null; then
+    while (( SECONDS < deadline )); do
+        if ! systemctl is-active --quiet caddy; then break; fi
+        if certificate_ready "$domain"; then
+            echo 'Caddy 公信证书已就绪。'
             return 0
         fi
-        if (( attempt < 15 )); then sleep 3; fi
+        if (( SECONDS >= next_update )); then
+            printf '仍在等待 %s 的签发结果…\n' "$domain"
+            next_update=$((SECONDS + 15))
+        fi
+        sleep 1
     done
-    printf '%s%s%s\n' "$red" '证书暂未就绪。检查 DNS 和公网 TCP 80，查看 journalctl -u caddy -n 30 --no-pager，然后重新选择 6。' "$reset" >&2
+    printf '%s%s%s\n' "$red" '证书暂未就绪。请核对域名 A/AAAA 记录和公网 TCP 80。修正后选 6 重试。' "$reset" >&2
+    logs=$(journalctl -u caddy --since "@$started" --no-pager -o cat 2>/dev/null | grep -F -- "$domain" | tail -n 8 || true)
+    if [[ -z $logs ]]; then
+        logs=$(journalctl -u caddy -n 8 --no-pager -o cat 2>/dev/null || true)
+    fi
+    if [[ -n $logs ]]; then printf '\nCaddy 最近的日志\n%s\n' "$logs" >&2; fi
     return 1
 }
 
 quick_install() {
-    local domain ip ports='' uuid version='' answer detected port protocol
+    local domain ip ports='' uuid version='' answer detected port protocol resolved started
     local protocol_ports=() protocol_labels=('VLESS / REALITY (TCP)' 'VMess WS (TCP)' 'Hysteria 2 (UDP)' 'TUIC (UDP)' 'AnyTLS (TCP)')
     local selection port_mode index
     local transports=(tcp tcp udp udp tcp)
@@ -147,16 +172,26 @@ quick_install() {
         printf '  %s：%s%s%s\n' "${protocol_labels[protocol]}" "$yellow" "$port" "$reset"
     done
     echo '安装后按输出放行各节点端口，再进行客户端验收。'
-    read -r -p "${yellow}开始安装？[Y/N，回车取消] $reset" answer </dev/tty || return 1
-    [[ $answer == y || $answer == Y ]] || return 0
+    read -r -p "${yellow}开始安装？[Y/n，回车确认] $reset" answer </dev/tty || return 1
+    [[ ${answer:-y} == [yY] ]] || return 0
+    if ! certificate_ready "$domain"; then
+        resolved=$(timeout 5 getent ahosts "$domain" | awk '$2 == "STREAM" && !seen[$1]++ {print $1}') || resolved=''
+        if [[ -z $resolved ]]; then
+            printf '%s域名 %s 尚未解析到可用地址。请检查 A/AAAA 记录后重试。%s\n' "$red" "$domain" "$reset" >&2
+            return 1
+        fi
+        printf '当前 DNS 解析结果（应指向这台 VPS）\n%s\n' "$resolved"
+    fi
     if [[ -n $version ]]; then
         duo packages --restart-managed --version "$version" || return 1
     elif [[ ! -x /usr/bin/sing-box ]] || ! command -v caddy >/dev/null; then
         duo packages || return 1
     fi
-    if ! curl -fs --noproxy '*' --max-time 3 --resolve "$domain:8443:127.0.0.1" \
-        "https://$domain:8443/" -o /dev/null; then
-        duo site "$domain" && wait_for_certificate "$domain" || return 1
+    if ! certificate_ready "$domain"; then
+        started=$(date +%s)
+        duo site "$domain" && wait_for_certificate "$domain" "$started" || return 1
+    else
+        echo 'Caddy 公信证书已就绪，继续安装。'
     fi
     duo five "$domain" "$ip" --ports "$ports" --uuid "$uuid" || return 1
     printf '\n%s五协议安装成功 · 本机监听已确认%s\n' "$green" "$reset"
@@ -603,6 +638,10 @@ while true; do
     option 0 '退出'
     home_rule "$width"
     vps_summary
+    if [[ ! -s /etc/$five_service/config.json &&
+        ! -s /etc/sing-box-reality/config.json && ! -s /etc/sing-box-hy2/config.json ]]; then
+        printf '%s尚未部署 JC 节点，请先选择 6 安装。%s\n' "$yellow" "$reset"
+    fi
     home_rule "$width"
     read -r -p "${yellow}请选择 [回车默认 1，0 退出]：$reset" selection </dev/tty || exit 1
     case "${selection:-1}" in

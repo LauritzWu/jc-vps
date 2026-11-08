@@ -33,3 +33,5 @@ jobs:
         run: bash tests/upgrade.sh
       - name: Check IPv4 and IPv6 node generation
         run: bash tests/five-addresses.sh
+      - name: Check certificate wait diagnostics
+        run: bash tests/certificate-wait.sh

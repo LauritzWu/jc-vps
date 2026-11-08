@@ -365,7 +365,7 @@ ensure_unused() {
 preflight() {
     valid_domain "$1"
     dpkg-query -S "$core" >/dev/null
-    site_curl "$1" / -fsS -o /dev/null
+    site_curl "$1" / -sS -o /dev/null
     find_cert "$1"
 }
 server_doc() {
