@@ -2,6 +2,12 @@
 set -euo pipefail
 umask 077
 
+revision=${1:-main}
+if (( $# > 1 )) || [[ $revision != main && ! $revision =~ ^[0-9a-f]{40}$ ]]; then
+    printf '用法：bootstrap.sh [完整 Git 提交 SHA]\n' >&2
+    exit 2
+fi
+
 if (( EUID != 0 )); then printf '请在 VPS 的 root 会话中运行。\n' >&2; exit 1; fi
 for dependency in curl; do
     if ! command -v "$dependency" >/dev/null; then
@@ -10,8 +16,8 @@ for dependency in curl; do
     fi
 done
 
-printf '%s\n' '正在下载 JC 程序与模板…'
-source_url='https://raw.githubusercontent.com/LauritzWu/lauritz-duo/main'
+printf '正在下载 JC 程序与模板（%s）…\n' "$revision"
+source_url="https://raw.githubusercontent.com/LauritzWu/lauritz-duo/$revision"
 dir=$(mktemp -d)
 trap 'rm -f "$dir/manager.sh" "$dir/client-template.json"; rmdir "$dir"' EXIT
 for file in manager.sh client-template.json; do
@@ -325,28 +331,29 @@ install_shortcut() {
     if [[ -e "$target" || -L "$target" ]]; then
         if [[ -f "$target" && ! -L "$target" && -x "$target" ]] &&
             grep -qxF -e '# Managed by JC' -e '# Managed by Lauritz Duo' "$target"; then
-            echo 'jc 快捷命令已安装。'
-            return 0
+            if grep -qxF "revision=$revision" "$target"; then
+                echo 'jc 快捷命令已安装。'
+                return 0
+            fi
+        else
+            echo '发现其他程序使用 /usr/local/bin/jc，保留原文件。' >&2
+            return 1
         fi
-        echo '发现其他程序使用 /usr/local/bin/jc，保留原文件。' >&2
-        return 1
     fi
-    temp=$(mktemp) || return 1
-    cat > "$temp" <<'DUOSH'
-#!/usr/bin/env bash
-# Managed by JC
-set -eu
+    temp=$(mktemp /usr/local/bin/.jc.XXXXXX) || return 1
+    if ! {
+        printf '%s\n' '#!/usr/bin/env bash' '# Managed by JC' 'set -eu' "revision=$revision"
+        cat <<'DUOSH'
 f=$(mktemp)
 trap 'rm -f "$f"' EXIT
-curl -4 -fsSL --connect-timeout 8 --max-time 25 https://raw.githubusercontent.com/LauritzWu/lauritz-duo/main/bootstrap.sh -o "$f"
-bash "$f"
+curl -4 -fsSL --connect-timeout 8 --max-time 25 "https://raw.githubusercontent.com/LauritzWu/lauritz-duo/$revision/bootstrap.sh" -o "$f"
+bash "$f" "$revision"
 DUOSH
-    if ! install -m 0755 "$temp" "$target"; then
+    } > "$temp" || ! chmod 0755 "$temp" || ! mv -fT -- "$temp" "$target"; then
         rm -f -- "$temp"
         return 1
     fi
-    rm -f -- "$temp"
-    echo 'jc 快捷命令已安装。'
+    printf 'jc 快捷命令已安装（%s）。\n' "$revision"
 }
 
 init_tools() {

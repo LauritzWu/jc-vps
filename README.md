@@ -2,7 +2,7 @@
 
 面向个人 VPS 的 sing-box 管理工具。使用官方 APT 版 sing-box，提供五协议安装向导、Caddy HTTPS 和受密码保护的远程配置，并兼容已有 REALITY / Hysteria 2 主备服务。
 
-## 一键打开菜单
+## 一键打开预览版菜单
 
 在 Ubuntu 或 Debian VPS 的 root Bash 会话中粘贴。入口需要 curl。菜单和管理命令使用 Bash，JSON 由 jq 处理。
 
@@ -16,6 +16,17 @@ s=$(curl -4fsSL -m 25 \
 首页包含服务状态、服务管理、客户端与订阅、网络与防火墙和系统工具。支持数字选择、回车默认和子菜单按 0 返回。底部显示系统、接口地址和服务状态。服务器地区通过 ipwho.is 按 VPS 公网出口 IP 查询并缓存 24 小时。5 → 3 可手动覆盖，已保存的地区优先使用。
 
 首次运行自动安装 `jc` 快捷命令，并通过 APT 补齐缺失的 jq、qrencode、OpenSSL、iproute2 和 flock。以后输入 `jc` 即可打开菜单。已有 `duo` 的用户可运行一次 `duo`，新版会自动安装 `jc`。主菜单选「6 一键安装 sing-box」，按顺序选择内核、输入域名和 IPv4、分配端口、生成或填写 UUID，最后确认安装。旧主备仍可在「2 服务管理」启动。
+
+## 按提交固定版本
+
+从待安装版本的 GitHub 发布页获取完整的 40 位提交 SHA，替换下面的 `完整提交SHA`。选择包含此安装方式的版本。入口、管理脚本、模板及后续的 `jc` 调用均使用同一提交。要切换版本，使用目标提交重新运行这段命令。
+
+```bash
+revision=完整提交SHA
+[[ $revision =~ ^[0-9a-f]{40}$ ]] &&
+  s=$(curl -4fsSL -m 25 "https://raw.githubusercontent.com/LauritzWu/lauritz-duo/$revision/bootstrap.sh") &&
+  bash -c "$s" -- "$revision"
+```
 
 主菜单选「7 完整卸载 JC」后，输入 `1` 确认，输入 `0` 或直接回车取消。确认后会停止 JC 服务、移除官方软件包，并删除 JC 节点配置、凭据、订阅文件和快捷命令。Caddy 网站及订阅路由定义、证书、防火墙和手动保存的备份会保留。重新安装时请使用上面的一键命令。
 
@@ -45,4 +56,4 @@ publish 使用随附的无凭据模板，从现有 /etc/sing-box-reality 和 /et
 
 此版本从此前为 sing-box-yg 改版编写的独立管理模块拆出。发行包不包含上游 sb.sh，旧菜单、旧快捷入口及旧脚本的自更新逻辑已移除。原型参考 yonggekkk/sing-box-yg，基准提交 b13f9435c4792fccf04d4fbc73e24a1948abff1b。项目独立维护，与上游作者及 SagerNet 无隶属关系。代码采用 GPL-3.0，许可证见 LICENSE。
 
-当前为 0.1.0 预览版。客户端生成曾用测试凭据校验。VPS 上安装、证书续期、跳跃和 IPv6 需现场验收。
+当前为 0.1.0 预览版。客户端生成曾用测试凭据校验。VPS 上安装、证书续期、跳跃和 IPv6 需现场验收，见 [VPS 验收清单](docs/vps-acceptance.md)。
