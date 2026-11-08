@@ -198,7 +198,7 @@ quick_install() {
     echo '请在云防火墙放行上面列出的 TCP/UDP 端口。外网验收通过后，在主菜单 2 启用开机启动。'
     option 1 '查看五条节点链接和二维码（含凭据）'
     option 2 '稍后在客户端与订阅菜单查看'
-    choose 2
+    choose 1
     if [[ $selection == 1 ]]; then duo five-share || return 1; fi
 }
 
