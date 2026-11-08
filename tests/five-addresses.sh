@@ -10,6 +10,10 @@ template="$root/client-template.json"
 ipv4=1.1.1.1
 ipv6=2606:4700::1
 ip() { [[ $* == "-6 route get $ipv6" ]]; }
+timeout() {
+    [[ $* == *'s_client -connect www.microsoft.com:443'* ]] || return 1
+    printf 'ALPN protocol: h2\n'
+}
 preflight() { cert="$test_dir/test.crt"; }
 ensure_unused() { :; }
 ss() { :; }
@@ -42,6 +46,26 @@ for host in "$ipv4" "$ipv6"; do
         jq -e --arg host "$host" '.add == $host and .sni == "example.com"' >/dev/null
     printf '%s configuration and links passed\n' "$host"
 done
+
+scratch="$test_dir/scratch-external"
+mkdir "$scratch"
+five=five-external
+five_deploy example.com "$ipv4" 443,8444,8445,8446,8447 12345678-1234-1234-1234-123456789abc www.microsoft.com
+dir="$test_dir/$five"
+jq -e '
+    .inbounds[0].tls.server_name == "www.microsoft.com" and
+    .inbounds[0].tls.reality.handshake == {server:"www.microsoft.com",server_port:443} and
+    all(.inbounds[1:][]; .tls.server_name == "example.com")
+' "$dir/config.json" >/dev/null
+jq -e '
+    all(.outbounds[] | select(has("server"));
+        .tls.server_name == (if .type == "vless" then "www.microsoft.com" else "example.com" end))
+' "$dir/profiles/all.json" >/dev/null
+grep -F 'sni=www.microsoft.com&' "$dir/profiles/links.txt" | grep -F 'vless://' >/dev/null
+if (five_deploy example.com "$ipv4" 8443,8444,8445,8446,8447 12345678-1234-1234-1234-123456789abc www.microsoft.com) >/dev/null 2>&1; then
+    echo 'Accepted TCP 8443 as a node port in external REALITY mode' >&2
+    exit 1
+fi
 
 for bad in '[2606:4700::1]' '2606::::1' 'fe80::1' '::1'; do
     if (valid_node_address "$bad") >/dev/null 2>&1; then
