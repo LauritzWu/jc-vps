@@ -63,13 +63,13 @@ rm -rf -- "$scratch/port"
 before=$(sha256sum "$dir/config.json" "$dir/profiles/links.txt" "$profiles/five/all.json")
 if (
     trap cleanup EXIT
-    restart_managed() { [[ $(jq -r '.inbounds[2].listen_port' "$dir/config.json") == 8445 ]]; }
+    restart_managed() { [[ $(jq -r '.inbounds[2].listen_port' "$(cfg "$five")") == 8445 ]]; }
     change_five_port hy2 28445
 ) >"$test_dir/rollback.log" 2>&1; then
     echo 'Expected restart failure'
     exit 1
 fi
-grep -F '已恢复原监听端口和客户端配置' "$test_dir/rollback.log" >/dev/null
+grep -F '已恢复原监听端口和客户端配置' "$test_dir/rollback.log" >/dev/null || { cat "$test_dir/rollback.log"; exit 1; }
 [[ $(sha256sum "$dir/config.json" "$dir/profiles/links.txt" "$profiles/five/all.json") == "$before" ]]
 echo 'IPv6 URI, VMess, published profiles, and port rollback passed'
 
