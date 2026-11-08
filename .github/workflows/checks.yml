@@ -31,3 +31,5 @@ jobs:
           sha256sum --strict --check /tmp/jc.sha256
       - name: Simulate package update and rollback
         run: bash tests/upgrade.sh
+      - name: Check IPv4 and IPv6 node generation
+        run: bash tests/five-addresses.sh

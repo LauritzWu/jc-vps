@@ -24,7 +24,7 @@ for file in manager.sh client-template.json; do
     curl -4 -fsSL --retry 2 --connect-timeout 8 --max-time 25 "$source_url/$file" -o "$dir/$file"
 done
 (cd "$dir" && sha256sum -c <<'SHA256'
-43a080ee4a75afee3c99875dfda58b881b4ff80823aad4b6ebfdfc34ed68511c  manager.sh
+1feb624a586c2b589a4a05ced3c8f1971404d38975fd9449c9cec586c17aaa63  manager.sh
 d96d8e1440c7b53ef47625820c77fe58c95a4ff0cef1f989d68c53ff099a7d7b  client-template.json
 SHA256
 )
@@ -86,7 +86,7 @@ quick_install() {
     [[ $domain != 0 ]] || return 0
     domain=${domain:-$detected}
     [[ $domain =~ ^[a-z0-9][a-z0-9.-]*\.[a-z][a-z0-9-]*$ ]] || { echo '请输入有效的小写域名。'; return 1; }
-    read -r -p 'VPS 公网 IPv4（0 返回）：' ip </dev/tty || return 1
+    read -r -p 'VPS 公网 IPv4 或 IPv6（0 返回）：' ip </dev/tty || return 1
     [[ $ip != 0 ]] || return 0
     duo validate-install "$domain" "$ip" || return 1
 
@@ -141,7 +141,7 @@ quick_install() {
     duo validate-install "$domain" "$ip" "$ports" "$uuid" || return 1
     printf '已确认 UUID：%s%s%s\n' "$green" "$uuid" "$reset"
     heading '5/5  确认安装'
-    printf '域名 %s · IPv4 %s\n' "$domain" "$ip"
+    printf '域名 %s · 节点地址 %s\n' "$domain" "$ip"
     for protocol in "${!protocol_labels[@]}"; do
         port=${protocol_ports[protocol]}
         printf '  %s：%s%s%s\n' "${protocol_labels[protocol]}" "$yellow" "$port" "$reset"
