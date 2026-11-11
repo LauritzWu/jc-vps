@@ -26,7 +26,7 @@ s=$(curl -4fsSL -m 25 "https://raw.githubusercontent.com/LauritzWu/jc-vps/$revis
 
 ## 新 VPS
 
-确认域名直指 VPS，公网 TCP 80 可用于 Caddy 签发和续期，随后选主菜单的「一键安装 sing-box」。每次安装选择一种节点地址。选择 IPv6 时，输入不带方括号的公网地址，并确认 VPS 和客户端都具备 IPv6 连通性。下载安装脚本和依赖仍需要 VPS 的 IPv4 出站。安装后按输出在云防火墙放行各协议对应的 TCP 或 UDP 端口。客户端验收通过后，在「服务管理」开启五协议自启动。命令行入口见 `bash duo.sh --help`。
+确认域名直指 VPS，公网 TCP 80 可用于 Caddy 签发和续期，随后选主菜单的「一键安装 sing-box」。每次安装选择一种节点地址。选择 IPv6 时，输入不带方括号的公网地址，并确认 VPS 和客户端都具备 IPv6 连通性。下载安装脚本和依赖仍需要 VPS 的 IPv4 出站。安装后按输出在云防火墙放行各协议对应的 TCP 或 UDP 端口。安装确认五个端口已监听后会自动启用开机自启。已有部署可在「服务管理」手动启用。命令行入口见 `bash duo.sh --help`。
 
 ## 无自有域名模式（试用）
 

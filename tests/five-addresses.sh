@@ -26,8 +26,14 @@ new_service() { mkdir -m 700 -- "$test_dir/$1"; }
 cfg() { printf '%s/%s/config.json\n' "$test_dir" "$1"; }
 private_put() { cat >"$1"; }
 unit_file() { :; }
-systemctl() { :; }
-socket_ready() { :; }
+systemctl() {
+    case "$1" in
+        start) listeners_confirmed=false; autostart=false ;;
+        enable) "$listeners_confirmed" || return 1; autostart=true ;;
+        is-enabled) "$autostart" ;;
+    esac
+}
+socket_ready() { listeners_confirmed=true; }
 
 for host in "$ipv4" "$ipv6"; do
     scratch="$test_dir/scratch-$host"

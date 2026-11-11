@@ -24,7 +24,7 @@ for file in manager.sh client-template.json; do
     curl -4 -fsSL --retry 2 --connect-timeout 8 --max-time 25 "$source_url/$file" -o "$dir/$file"
 done
 (cd "$dir" && sha256sum -c <<'SHA256'
-059f00a40ab19d131f519a68a8138280d4889d1e0c4ee3a9f1c79d2ca8b592cf  manager.sh
+bf023805529eaa925fee0964653ab86d518fa75a969997a39f94eb10e62e5fc0  manager.sh
 d96d8e1440c7b53ef47625820c77fe58c95a4ff0cef1f989d68c53ff099a7d7b  client-template.json
 SHA256
 )
@@ -355,8 +355,8 @@ quick_install() {
     if [[ -n $reality_sni ]]; then target_args+=(--reality-sni "$reality_sni"); fi
     if [[ $mode == 2 ]]; then target_args+=(--preset-names "$preset_names"); fi
     duo five "$domain" "$ip" --ports "$ports" --uuid "$uuid" "${target_args[@]}" || return 1
-    printf '\n%s五协议安装成功 · 本机监听已确认%s\n' "$green" "$reset"
-    echo '请在云防火墙放行上面列出的 TCP/UDP 端口。外网验收通过后，在主菜单 4 启用开机启动。'
+    printf '\n%s五协议安装成功 · 本机监听已确认 · 已启用开机自启%s\n' "$green" "$reset"
+    echo '请在云防火墙放行上面列出的 TCP/UDP 端口，再从客户端逐条验证。'
     if [[ $mode == 2 ]]; then
         option 1 '生成 v2rayN 兼容链接和二维码（需确认）'
         option 2 '查看普通链接和公钥固定 JSON'
@@ -423,8 +423,7 @@ client_menu() {
             1) duo five-share || echo '请先完成五协议安装。' ;;
             2) duo five-share --publish || echo '发布未完成，请检查上方信息。' ;;
             3) printf '%s\n' '导入五协议节点链接，或将 sing-box JSON 导入客户端。' \
-                   '逐条切换为活动节点并打开网页，确认连接和出口地址。' \
-                   '实测通过后，可在「服务管理」启用五协议开机启动。' ;;
+                   '逐条切换为活动节点并打开网页，确认连接和出口地址。' ;;
             4) address_menu ;;
             5) duo five-share --v2rayn || true ;;
             *) echo '无效选项。' ;;
@@ -692,7 +691,7 @@ service_menu() {
     while true; do
         heading '服务管理'
         option 1 '启动或恢复五协议服务'
-        option 2 '五协议设为开机启动（客户端验收后）'
+        option 2 '启用五协议开机自启（已有部署）'
         option 3 '更换单个五协议节点的端口'
         choose 1
         case "$selection" in
@@ -714,11 +713,11 @@ service_menu() {
                 read -r -p '确认切换端口？[y/N] ' answer </dev/tty || return
                 if [[ $answer == [yY] ]]; then duo five-port "$kind" "$port" || true; fi ;;
             2)
-                read -r -p '客户端验收已经通过？[Y/N] ' answer </dev/tty || return
+                read -r -p '启用五协议开机自启？[y/N] ' answer </dev/tty || return
                 if [[ $answer == [yY] ]]; then
                     if systemctl is-active --quiet "$five_service"; then
-                        systemctl enable "$five_service" || true
-                    else echo '请先启动服务并完成外网验收。'; fi
+                        systemctl enable "$five_service" && echo '已启用五协议开机自启。'
+                    else echo '请先启动五协议服务。'; fi
                 fi ;;
             *) echo '无效选项。' ;;
         esac

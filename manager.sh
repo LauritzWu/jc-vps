@@ -371,7 +371,9 @@ cleanup() {
                 return "$code"
             fi
         fi
-        for name in "${started[@]}"; do systemctl stop "$name" || true; done
+        for name in "${started[@]}"; do
+            systemctl disable --now "$name" || systemctl stop "$name" || true
+        done
         for name in "${created[@]}"; do rm -rf -- "$name"; done
         if (( ${#started[@]} )); then systemctl daemon-reload || true; fi
     fi
@@ -633,6 +635,8 @@ five_deploy() {
     started+=("$five")
     systemctl start "$five"
     socket_ready "$five" "${listeners[@]}" || fail '未确认五个端口均由新服务监听'
+    systemctl enable "$five" && systemctl is-enabled --quiet "$five" ||
+        fail '启用五协议开机自启失败，正在回退本次安装'
     for i in "${!kinds[@]}"; do
         printf '已监听 %-8s %s%s%s\n' "${kinds[i]}" "$green" "${listeners[i]}" "$reset"
     done
