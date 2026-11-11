@@ -17,7 +17,7 @@ fi
 template=$(dirname -- "$0")/client-template.json
 kinds=(reality vmess hy2 tuic anytls)
 protocols=(tcp tcp udp udp tcp)
-aliases=(JC-VLESS JC-VMESS JC-HY2 JC-TUIC JC-ANYTLS)
+node_types=(vless vmess hysteria2 tuic anytls)
 
 accent='' green='' yellow='' red='' reset=''
 if [[ -t 1 && "${TERM:-dumb}" != dumb && -z "${NO_COLOR:-}" ]]; then
@@ -443,10 +443,35 @@ pick_port() {
     fail '未找到可用随机端口'
 }
 
+reality_target_ready() {
+    local probe
+    probe=$(timeout 8 openssl s_client -connect "$1:443" -servername "$1" \
+        -verify_hostname "$1" -verify_return_error -tls1_3 -alpn h2 </dev/null 2>/dev/null) || return 1
+    [[ $probe == *'ALPN protocol: h2'* ]]
+}
+
+set_node_aliases() {
+    local region='' i config_home="${XDG_CONFIG_HOME:-$HOME/.config}"
+    if [[ -s $config_home/jc/region ]]; then
+        IFS= read -r region <"$config_home/jc/region" || true
+    elif [[ -s $config_home/lauritz-duo/region ]]; then
+        IFS= read -r region <"$config_home/lauritz-duo/region" || true
+    elif [[ -r $config_home/jc/region.auto ]]; then
+        region=$(sed -n '3s/,.*//p' "$config_home/jc/region.auto")
+    fi
+    region=$(printf '%s' "$region" | tr -d '[:cntrl:]' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | cut -c1-60)
+    aliases=(VLESS-REALITY VMess-WS Hysteria2 TUIC AnyTLS)
+    for i in "${!aliases[@]}"; do
+        if [[ -n $region ]]; then aliases[i]+="-$region"; fi
+        encoded_aliases[i]=$(jq -nr --arg label "${aliases[i]}" '$label | @uri')
+    done
+}
+
 five_deploy() {
     local domain=$1 host=$2 ports_text=$3 user=$4 cert private public short ws hp tp ap i port flag rows label
-    local reality_target=${5:-} reality_name=$1 handshake_host=127.0.0.1 handshake_port=8443 tls_probe
+    local reality_target=${5:-} reality_name=$1 handshake_host=127.0.0.1 handshake_port=8443
     local listen=0.0.0.0 uri_host=$2
+    local aliases=() encoded_aliases=()
     local ports=() listeners=() used=' ' dir
     dir="$(dirname -- "$(cfg "$five")")/profiles"
     valid_node_address "$host"
@@ -468,10 +493,8 @@ five_deploy() {
         for i in 0 1 4; do
             [[ ${ports[i]} != 8443 ]] || fail 'TCP 8443 预留给自有域名的 HTTPS 订阅'
         done
-        tls_probe=$(timeout 8 openssl s_client -connect "$reality_target:443" -servername "$reality_target" \
-            -verify_hostname "$reality_target" -verify_return_error -tls1_3 -alpn h2 </dev/null 2>/dev/null) ||
-            fail "VPS 无法与 $reality_target 建立可信的 TLS 1.3 连接，请换一个目标"
-        [[ $tls_probe == *'ALPN protocol: h2'* ]] || fail "$reality_target 未协商 HTTP/2，请换一个目标"
+        reality_target_ready "$reality_target" ||
+            fail "VPS 无法与 $reality_target 完成可信的 TLS 1.3 和 HTTP/2 握手，请换一个目标"
     fi
     for i in "${!kinds[@]}"; do
         flag=-lnt
@@ -525,15 +548,16 @@ five_deploy() {
     ' >"$scratch/five.json"
     jq '.ins' "$scratch/five.json" | server_doc >"$scratch/server.json"
     check "$scratch/server.json"
+    set_node_aliases
     {
-        reality_uri "$user" "$uri_host" "${ports[0]}" "$short" JC-VLESS "$reality_name"
+        reality_uri "$user" "$uri_host" "${ports[0]}" "$short" "${encoded_aliases[0]}" "$reality_name"
         printf 'vmess://'
-        DUO_UUID=$user DUO_WS=$ws jq -cn --arg host "$host" --arg port "${ports[1]}" --arg sni "$domain" \
-            '{v:"2",ps:"JC-VMESS",add:$host,port:$port,id:$ENV.DUO_UUID,aid:"0",scy:"auto",net:"ws",
+        DUO_UUID=$user DUO_WS=$ws jq -cn --arg host "$host" --arg port "${ports[1]}" --arg sni "$domain" --arg label "${aliases[1]}" \
+            '{v:"2",ps:$label,add:$host,port:$port,id:$ENV.DUO_UUID,aid:"0",scy:"auto",net:"ws",
               type:"none",path:$ENV.DUO_WS,tls:"tls",sni:$sni,host:$sni}' | base64 -w0
-        printf '\nhysteria2://%s@%s:%s?sni=%s&insecure=0#JC-HY2\n' "$hp" "$uri_host" "${ports[2]}" "$domain"
-        printf 'tuic://%s:%s@%s:%s?sni=%s&alpn=h3#JC-TUIC\n' "$user" "$tp" "$uri_host" "${ports[3]}" "$domain"
-        printf 'anytls://%s@%s:%s?sni=%s#JC-ANYTLS\n' "$ap" "$uri_host" "${ports[4]}" "$domain"
+        printf '\nhysteria2://%s@%s:%s?sni=%s&insecure=0#%s\n' "$hp" "$uri_host" "${ports[2]}" "$domain" "${encoded_aliases[2]}"
+        printf 'tuic://%s:%s@%s:%s?sni=%s&alpn=h3#%s\n' "$user" "$tp" "$uri_host" "${ports[3]}" "$domain" "${encoded_aliases[3]}"
+        printf 'anytls://%s@%s:%s?sni=%s#%s\n' "$ap" "$uri_host" "${ports[4]}" "$domain" "${encoded_aliases[4]}"
     } >"$scratch/links.txt"
     new_service "$five"
     mkdir -m 700 "$dir"
@@ -643,8 +667,8 @@ change_five_port() {
     printf '\n' >>"$scratch/port/all.sub"
     files=("$config" "$dir/links.txt")
     for label in "$kind" all; do
-        jq --arg tag "${aliases[i]}" --arg legacy "$kind" --argjson old "$old_port" --argjson port "$new_port" '
-            def match_node: .tag == $tag or .tag == $legacy;
+        jq --arg type "${node_types[i]}" --argjson old "$old_port" --argjson port "$new_port" '
+            def match_node: .type == $type;
             if ([.outbounds[] | select(match_node and .server_port == $old)] | length) != 1 then
                 error("客户端配置端口不一致")
             else .outbounds |= map(if match_node then .server_port=$port else . end) end
@@ -774,9 +798,11 @@ change_five_address() {
 print_link() { printf '%s%s%s\n' "$yellow" "$1" "$reset"; }
 
 brand_five_json() {
-    jq '
-        def alias:
-            {reality:"JC-VLESS",vmess:"JC-VMESS",hy2:"JC-HY2",tuic:"JC-TUIC",anytls:"JC-ANYTLS"}[.] // .;
+    jq --arg vless "${aliases[0]}" --arg vmess "${aliases[1]}" --arg hy2 "${aliases[2]}" \
+        --arg tuic "${aliases[3]}" --arg anytls "${aliases[4]}" '
+        {vless:$vless,vmess:$vmess,hysteria2:$hy2,tuic:$tuic,anytls:$anytls} as $names |
+        (.outbounds | map(select($names[.type]) | {key:.tag,value:$names[.type]}) | from_entries) as $tags |
+        def alias: $tags[.] // .;
         .outbounds |= map(
             if .tag == "PROXY" and .type == "selector" then
                 .outbounds |= map(alias) | .default |= alias
@@ -797,7 +823,7 @@ refresh_five_aliases() {
                 "vmess://" + (@base64d | fromjson | .ps=$label | tojson | @base64)
             ')
         else
-            links[i]="${link%#*}#${aliases[i]}"
+            links[i]="${link%#*}#${encoded_aliases[i]}"
         fi
     done
     printf '%s\n' "${links[@]}" >"$scratch/jc-links.txt"
@@ -831,6 +857,8 @@ show_qr() {
 five_share() {
     local domain hash auth port url dir="/etc/$five/profiles" prefix=/profiles/five
     local i=0 link label ext handshake external=false
+    local aliases=() encoded_aliases=()
+    set_node_aliases
     domain=$(jq -er '.inbounds[] | select(.type=="vmess") | .tls.server_name' "$(cfg "$five")")
     valid_domain "$domain"
     port=$(jq -er '.inbounds[0].listen_port' "$(cfg "$five")")
@@ -973,6 +1001,12 @@ case "$command_name" in --help|-h) help_text; exit 0;; esac
 if [[ $command_name == five-service ]]; then printf '%s\n' "$five"; exit 0; fi
 shift
 [[ $OSTYPE == linux* && $EUID == 0 ]] || fail '请在 Ubuntu/Debian VPS 的 root 会话中运行'
+if [[ $command_name == reality-probe ]]; then
+    [[ $# == 1 ]] || fail '缺少 REALITY 目标域名'
+    valid_domain "$1"
+    reality_target_ready "$1"
+    exit
+fi
 if [[ $command_name == five-summary ]]; then five_summary; exit; fi
 exec 9>/run/lock/sing-box-yg-plus.lock
 flock -n 9 || fail '另一个 JC 操作正在运行'

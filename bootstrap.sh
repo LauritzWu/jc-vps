@@ -24,7 +24,7 @@ for file in manager.sh client-template.json; do
     curl -4 -fsSL --retry 2 --connect-timeout 8 --max-time 25 "$source_url/$file" -o "$dir/$file"
 done
 (cd "$dir" && sha256sum -c <<'SHA256'
-90d7872e12516b25538906e39c2cf153a405ef7a8e472497e3e6439422741393  manager.sh
+7f4b134ab2bb18f1603efd7d46ad94ea50b61491907b35e570fa22a4baee1c06  manager.sh
 d96d8e1440c7b53ef47625820c77fe58c95a4ff0cef1f989d68c53ff099a7d7b  client-template.json
 SHA256
 )
@@ -78,7 +78,7 @@ wait_for_certificate() {
 }
 
 quick_install() {
-    local domain ip ports='' uuid version='' answer detected port protocol resolved started reality_target='' target_index
+    local domain ip ports='' uuid version='' answer port protocol resolved started reality_target='' target_index candidate
     local reality_targets=(aws.amazon.com www.microsoft.com www.cloudflare.com www.amazon.com dl.google.com www.samsung.com www.intel.com)
     local protocol_ports=() protocol_labels=('VLESS / REALITY (TCP)' 'VMess WS (TCP)' 'Hysteria 2 (UDP)' 'TUIC (UDP)' 'AnyTLS (TCP)')
     local selection port_mode index
@@ -107,7 +107,9 @@ quick_install() {
     esac
     heading '2/5  域名和证书'
     option 1 '使用自己的域名作为 REALITY 目标'
-    option 2 '从常用站点选择 REALITY 目标'
+    option 2 '从常用站点手动选择 REALITY 目标'
+    option 3 '自动探测并选择常用 REALITY 目标'
+    option 4 '手动输入其他 REALITY 目标域名'
     choose 1
     case "$selection" in
         0) return 0 ;;
@@ -123,16 +125,36 @@ quick_install() {
                 [1-7]) reality_target=${reality_targets[selection-1]} ;;
                 *) echo '无效选项。'; return 1 ;;
             esac
-            printf 'REALITY 握手目标 %s:443 · REALITY SNI %s\n' "$reality_target" "$reality_target"
-            echo 'REALITY 的目标和 SNI 已选好。接下来请输入你自己的域名，用于另外四个协议的 TLS 证书和 HTTPS 订阅。'
+            ;;
+        3)
+            echo '正在从 VPS 探测候选站点的 TLS 1.3 和 HTTP/2…'
+            for candidate in "${reality_targets[@]}"; do
+                if duo reality-probe "$candidate"; then
+                    reality_target=$candidate
+                    break
+                fi
+            done
+            [[ -n $reality_target ]] || { echo '暂未找到可用目标，请重试或手动选择。'; return 1; }
+            ;;
+        4)
+            read -r -p 'REALITY 目标域名（0 返回）：' reality_target </dev/tty || return 1
+            [[ $reality_target != 0 ]] || return 0
+            duo reality-probe "$reality_target" ||
+                { echo '目标未通过 TLS 1.3 和 HTTP/2 检查。'; return 1; }
             ;;
         *) echo '无效选项。'; return 1 ;;
     esac
-    detected=$(jq -r '.inbounds[0].tls.server_name // empty' /etc/sing-box-reality/config.json 2>/dev/null || true)
-    read -r -p "站点域名${detected:+ [回车使用 $detected]}（0 返回）：" domain </dev/tty || return 1
+    if [[ -n $reality_target ]]; then
+        printf 'REALITY 握手目标 %s:443 · REALITY SNI %s\n' "$reality_target" "$reality_target"
+        echo '请填写自己的站点域名，用于另外四个协议的 TLS 证书和 HTTPS 订阅。'
+    fi
+    read -r -p '自己的站点域名（0 返回）：' domain </dev/tty || return 1
     [[ $domain != 0 ]] || return 0
-    domain=${domain:-$detected}
     [[ $domain =~ ^[a-z0-9][a-z0-9.-]*\.[a-z][a-z0-9-]*$ ]] || { echo '请输入有效的小写域名。'; return 1; }
+    if [[ $domain == "$reality_target" ]]; then
+        echo '站点域名和外部目标相同，请选择选项 1 使用本机 REALITY 目标。'
+        return 1
+    fi
     read -r -p 'VPS 公网 IPv4 或 IPv6（0 返回）：' ip </dev/tty || return 1
     [[ $ip != 0 ]] || return 0
     duo validate-install "$domain" "$ip" || return 1

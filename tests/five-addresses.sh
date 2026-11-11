@@ -6,6 +6,9 @@ test_dir=$(mktemp -d)
 trap 'rm -rf -- "$test_dir"' EXIT
 source <(sed '/^command_name=/,$d' "$root/manager.sh")
 template="$root/client-template.json"
+export XDG_CONFIG_HOME="$test_dir/settings"
+mkdir -p "$XDG_CONFIG_HOME/jc"
+printf '0\nkey\nFrankfurt, Hesse, Germany\n' >"$XDG_CONFIG_HOME/jc/region.auto"
 
 ipv4=1.1.1.1
 ipv6=2606:4700::1
@@ -44,6 +47,10 @@ for host in "$ipv4" "$ipv6"; do
     done
     sed -n 's/^vmess:\/\///p' "$dir/profiles/links.txt" | base64 -d |
         jq -e --arg host "$host" '.add == $host and .sni == "example.com"' >/dev/null
+    grep -F '#VLESS-REALITY-Frankfurt' "$dir/profiles/links.txt" >/dev/null
+    jq -e '.outbounds[0].default == "VLESS-REALITY-Frankfurt" and
+        .outbounds[1].tag == "VLESS-REALITY-Frankfurt" and .outbounds[0].outbounds[4] == "AnyTLS-Frankfurt"' \
+        "$dir/profiles/all.json" >/dev/null
     printf '%s configuration and links passed\n' "$host"
 done
 
@@ -115,6 +122,7 @@ if grep -Eq '12345678-1234-1234-1234-123456789abc|test-private|vless://' <<<"$su
     echo 'Node overview exposed credentials' >&2
     exit 1
 fi
+printf 'New York\n' >"$XDG_CONFIG_HOME/jc/region"
 scratch="$test_dir/scratch-external"
 mkdir "$scratch"
 five=five-external
@@ -135,6 +143,7 @@ if (five_deploy example.com "$ipv4" 8443,8444,8445,8446,8447 12345678-1234-1234-
     exit 1
 fi
 
+grep -F '#VLESS-REALITY-New%20York' "$dir/profiles/links.txt" >/dev/null
 summary=$(five_summary)
 grep -Eq 'REALITY +TCP 443 +SNI: www\.microsoft\.com' <<<"$summary"
 grep -F '已发布 · TCP 8443' <<<"$summary" >/dev/null
