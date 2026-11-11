@@ -179,3 +179,19 @@ for bad in '[2606:4700::1]' '2606::::1' 'fe80::1' '::1'; do
         exit 1
     fi
 done
+
+(
+    source <(sed -n '/^choose_preset_reality()/,/^quick_install()/ { /^quick_install()/d; p; }' "$root/bootstrap.sh")
+    heading() { :; }
+    option() { :; }
+    choices=(1 9)
+    choose() {
+        [[ $1 == 9 ]]
+        selection=${choices[0]}
+        choices=("${choices[@]:1}")
+    }
+    duo() { [[ $1 == reality-probe && $2 == aws.amazon.com ]]; }
+    result=''
+    choose_preset_reality result apple.com aws.amazon.com
+    [[ $result == aws.amazon.com && ${#choices[@]} == 0 ]]
+)
