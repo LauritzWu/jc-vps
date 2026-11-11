@@ -76,6 +76,26 @@ fi
 grep -F '已恢复原监听端口和客户端配置' "$test_dir/rollback.log" >/dev/null || { cat "$test_dir/rollback.log"; exit 1; }
 [[ $(sha256sum "$dir/config.json" "$dir/profiles/links.txt" "$profiles/five/all.json") == "$before" ]]
 echo 'IPv6 URI, VMess, published profiles, and port rollback passed'
+caddyfile="$test_dir/Caddyfile"
+cat >"$caddyfile" <<'CADDY'
+example.com:8443 {
+    handle_path /profiles/five/* {
+        file_server
+    }
+}
+CADDY
+openssl req -x509 -newkey rsa:2048 -nodes -days 2 -subj /CN=example.com \
+    -keyout "$test_dir/test.key" -out "$test_dir/test.crt" >/dev/null 2>&1
+summary=$(five_summary)
+grep -Eq 'REALITY +TCP 28443 +SNI: example\.com' <<<"$summary"
+grep -Eq 'VMess WS +TCP 28444' <<<"$summary"
+grep -Eq 'Hysteria 2 +UDP 8445' <<<"$summary"
+grep -F '距到期约' <<<"$summary" >/dev/null
+grep -F '已发布 · TCP 28443' <<<"$summary" >/dev/null
+if grep -Eq '12345678-1234-1234-1234-123456789abc|test-private|vless://' <<<"$summary"; then
+    echo 'Node overview exposed credentials' >&2
+    exit 1
+fi
 scratch="$test_dir/scratch-external"
 mkdir "$scratch"
 five=five-external
@@ -95,6 +115,12 @@ if (five_deploy example.com "$ipv4" 8443,8444,8445,8446,8447 12345678-1234-1234-
     echo 'Accepted TCP 8443 as a node port in external REALITY mode' >&2
     exit 1
 fi
+
+summary=$(five_summary)
+grep -Eq 'REALITY +TCP 443 +SNI: www\.microsoft\.com' <<<"$summary"
+grep -F '已发布 · TCP 8443' <<<"$summary" >/dev/null
+rm -- "$profiles/five/all.sub"
+grep -F '未发布' <<<"$(five_summary)" >/dev/null
 
 for bad in '[2606:4700::1]' '2606::::1' 'fe80::1' '::1'; do
     if (valid_node_address "$bad") >/dev/null 2>&1; then

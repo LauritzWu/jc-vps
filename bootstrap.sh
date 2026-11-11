@@ -24,7 +24,7 @@ for file in manager.sh client-template.json; do
     curl -4 -fsSL --retry 2 --connect-timeout 8 --max-time 25 "$source_url/$file" -o "$dir/$file"
 done
 (cd "$dir" && sha256sum -c <<'SHA256'
-f2c5ba9e6e1052a963620a3a0065e13a723907087d52c4e49744baefc130f4e9  manager.sh
+59baa126e47ba1a2d0de823c4e54cb09895cd18ca077d613ca0784fa55a9f777  manager.sh
 d96d8e1440c7b53ef47625820c77fe58c95a4ff0cef1f989d68c53ff099a7d7b  client-template.json
 SHA256
 )
@@ -468,7 +468,7 @@ detect_region() {
 }
 
 vps_summary() {
-    local os ipv4 ipv6 region kernel state
+    local os ipv4 ipv6 region kernel state autostart
     os=$(awk -F= '$1=="PRETTY_NAME" {print substr($0,index($0,"=")+1); exit}' /etc/os-release 2>/dev/null || true)
     os=${os#\"}; os=${os%\"}
     ipv4=$(ip -o -4 addr show scope global 2>/dev/null | awk '{sub(/\/.*/,"",$4); printf "%s%s", sep,$4; sep="  "}' || true)
@@ -493,7 +493,29 @@ vps_summary() {
     printf ' 主机  %s    系统  %s\n' "$(hostname)" "${os:-未知}"
     printf ' Linux %s    架构  %s    sing-box  %s\n' "$(uname -r)" "$(uname -m)" "${kernel:-未检测到}"
     printf ' IPv4  %s\n IPv6  %s\n' "${ipv4:-未检测到}" "${ipv6:-未检测到}"
-    printf ' 地区  %s\n 服务  五协议 %s\n' "${region:-未能识别（系统工具可手动覆盖）}" "$state"
+    printf ' 地区  %s\n 服务  五协议 %s' "${region:-未能识别（系统工具可手动覆盖）}" "$state"
+    if [[ $state != 未安装 ]]; then
+        autostart='未启用'
+        if systemctl is-enabled --quiet "$five_service" 2>/dev/null; then autostart='已启用'; fi
+        printf ' · 开机自启%s' "$autostart"
+    fi
+    printf '\n'
+}
+
+status_menu() {
+    local selection
+    while true; do
+        heading '服务状态'
+        option 1 '查看服务状态和本机监听'
+        option 2 '查看五协议最近 50 条运行日志'
+        choose 1
+        case "$selection" in
+            0) return ;;
+            1) duo status || true ;;
+            2) journalctl -u "$five_service.service" -n 50 --no-pager || true ;;
+            *) echo '无效选项。' ;;
+        esac
+    done
 }
 
 service_menu() {
@@ -624,8 +646,11 @@ while true; do
     option 0 '退出'
     home_rule "$width"
     vps_summary
-    if [[ ! -s /etc/$five_service/config.json ]]; then
-        printf '%s尚未部署 JC 节点，请先选择 1 安装。%s\n' "$yellow" "$reset"
+    if [[ -s /etc/$five_service/config.json ]]; then
+        heading '五协议节点 · 配置端口'
+        duo five-summary || true
+    else
+        printf '%s尚未部署 JC 节点，按 1 或回车安装。%s\n' "$yellow" "$reset"
     fi
     home_rule "$width"
     read -r -p "${yellow}请选择 [回车默认 1 安装，0 退出]：$reset" selection </dev/tty || exit 1
@@ -639,7 +664,7 @@ while true; do
                     's=$(curl -4fsSL -m 25 "https://raw.githubusercontent.com/LauritzWu/jc-vps/$revision/bootstrap.sh") && bash -c "$s" -- "$revision"'
                 exit 0
             fi ;;
-        3) duo status || true ;;
+        3) status_menu ;;
         4) service_menu ;;
         5) client_menu ;;
         6) firewall_menu ;;

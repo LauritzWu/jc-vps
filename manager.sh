@@ -801,6 +801,53 @@ CADDY
     fi
 }
 
+five_summary() {
+    local config rows domain cert expiry now port handshake block
+    config=$(cfg "$five")
+    rows=$(jq -er '
+        {"vless":"REALITY","vmess":"VMess WS","hysteria2":"Hysteria 2","tuic":"TUIC","anytls":"AnyTLS"} as $names |
+        .inbounds[] | select($names[.type] and (.listen_port | type == "number")) |
+        [$names[.type], (if .type == "hysteria2" or .type == "tuic" then "UDP" else "TCP" end),
+         .listen_port, (if .type == "vless" then
+            (.tls.server_name // "" | select(test("^[A-Za-z0-9.-]*$")))
+         else "" end)] | @tsv
+    ' "$config" 2>/dev/null) || { echo ' 无法读取五协议节点配置。'; return; }
+    local name transport sni
+    while IFS=$'\t' read -r name transport port sni; do
+        printf ' %-12s %s %s' "$name" "$transport" "$port"
+        if [[ -n $sni ]]; then printf '   SNI: %s' "$sni"; fi
+        printf '\n'
+    done <<<"$rows"
+
+    domain=$(jq -r '.inbounds[] | select(.type=="vmess") | .tls.server_name // empty' "$config")
+    cert=$(jq -r '.inbounds[] | select(.type=="vmess") | .tls.certificate_path // empty' "$config")
+    if [[ -r $cert ]] && expiry=$(openssl x509 -in "$cert" -enddate -noout 2>/dev/null) &&
+        expiry=$(date -u -d "${expiry#notAfter=}" +%s 2>/dev/null); then
+        now=$(date -u +%s)
+        if (( expiry <= now )); then
+            echo ' TLS 证书     已过期'
+        else
+            printf ' TLS 证书     距到期约 %s 天\n' "$(( (expiry - now + 86399) / 86400 ))"
+        fi
+    else
+        echo ' TLS 证书     无法读取有效期'
+    fi
+
+    block=''
+    if [[ -r $caddyfile ]] && (valid_domain "$domain") >/dev/null 2>&1; then
+        block=$(site_block "$domain")
+    fi
+    if [[ $block == *'handle_path /profiles/five/*'* &&
+        -s $profiles/five/all.json && -s $profiles/five/all.sub ]]; then
+        port=$(jq -r '.inbounds[] | select(.type=="vless") | .listen_port' "$config")
+        handshake=$(jq -r '.inbounds[] | select(.type=="vless") | .tls.reality.handshake.server' "$config")
+        if [[ $handshake != 127.0.0.1 ]]; then port=8443; fi
+        printf ' HTTPS 订阅   已发布 · TCP %s\n' "$port"
+    else
+        echo ' HTTPS 订阅   未发布'
+    fi
+}
+
 help_text() {
     cat <<'HELP'
 JC
@@ -819,6 +866,7 @@ case "$command_name" in --help|-h) help_text; exit 0;; esac
 if [[ $command_name == five-service ]]; then printf '%s\n' "$five"; exit 0; fi
 shift
 [[ $OSTYPE == linux* && $EUID == 0 ]] || fail '请在 Ubuntu/Debian VPS 的 root 会话中运行'
+if [[ $command_name == five-summary ]]; then five_summary; exit; fi
 exec 9>/run/lock/sing-box-yg-plus.lock
 flock -n 9 || fail '另一个 JC 操作正在运行'
 scratch=$(mktemp -d)
