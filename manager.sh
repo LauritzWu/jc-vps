@@ -180,22 +180,21 @@ uninstall() {
             fail "无法确认 $service.service 的状态"
         [[ $state == not-found ]] || fail "检测到旧双协议服务 $service.service，请先迁移并移除旧服务"
     done
-    for service in "$five"; do
-        state=$(systemctl show -p LoadState --value "$service.service")
-        case "$state" in
-            not-found) continue ;;
-            loaded)
-                fragment=$(systemctl show -p FragmentPath --value "$service.service")
-                [[ $fragment == "$units/$service.service" && ! -L $fragment ]] ||
-                    fail "检测到外部服务定义 $service.service"
-                managed+=("$service.service")
-                files+=("$fragment")
-                ;;
-            *) fail "无法确认 $service.service 的状态（$state）" ;;
-        esac
-        pid=$(systemctl show -p MainPID --value "$service.service")
-        owned_pids+=("$pid")
-    done
+    state=$(systemctl show -p LoadState --value "$five.service") || [[ $state == not-found ]] ||
+        fail "无法确认 $five.service 的状态"
+    case "$state" in
+        not-found) ;;
+        loaded)
+            fragment=$(systemctl show -p FragmentPath --value "$five.service")
+            [[ $fragment == "$units/$five.service" && ! -L $fragment ]] ||
+                fail "检测到外部服务定义 $five.service"
+            managed+=("$five.service")
+            files+=("$fragment")
+            pid=$(systemctl show -p MainPID --value "$five.service")
+            owned_pids+=("$pid")
+            ;;
+        *) fail "无法确认 $five.service 的状态（$state）" ;;
+    esac
     processes=$(pgrep -x sing-box) || [[ $? == 1 ]] || fail '无法检查正在运行的 sing-box 进程'
     for pid in $processes; do
         [[ " ${owned_pids[*]} " == *" $pid "* ]] || fail "检测到其他 sing-box 进程（PID $pid），请先检查"
