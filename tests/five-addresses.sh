@@ -9,7 +9,7 @@ template="$root/client-template.json"
 
 ipv4=1.1.1.1
 ipv6=2606:4700::1
-ip() { [[ $* == "-6 route get $ipv6" ]]; }
+ip() { [[ $* == "-6 route get $ipv6" || $* == "-6 route get 2606:4700::2" ]]; }
 timeout() {
     [[ $* == *'s_client -connect www.microsoft.com:443'* ]] || return 1
     printf 'ALPN protocol: h2\n'
@@ -76,6 +76,23 @@ fi
 grep -F '已恢复原监听端口和客户端配置' "$test_dir/rollback.log" >/dev/null || { cat "$test_dir/rollback.log"; exit 1; }
 [[ $(sha256sum "$dir/config.json" "$dir/profiles/links.txt" "$profiles/five/all.json") == "$before" ]]
 echo 'IPv6 URI, VMess, published profiles, and port rollback passed'
+if (change_five_address 1.0.0.1 <<<y) >/dev/null 2>&1; then
+    echo 'Accepted an IPv4 address on the IPv6 listener' >&2
+    exit 1
+fi
+change_five_address 2606:4700::2 <<<n
+[[ $(sha256sum "$dir/config.json" "$dir/profiles/links.txt" "$profiles/five/all.json") == "$before" ]]
+(
+    curl() { printf '%s\n' '{"success":true,"ip":"2606:4700::2"}'; }
+    change_five_address --ipv6 <<<y
+)
+grep -F '@[2606:4700::2]:28443?' "$dir/profiles/links.txt" >/dev/null
+sed -n 's/^vmess:\/\///p' "$dir/profiles/links.txt" | base64 -d |
+    jq -e '.add == "2606:4700::2" and .port == "28444" and .sni == "example.com"' >/dev/null
+jq -e '[.outbounds[] | select(has("server_port"))] |
+    length == 5 and all(.[]; .server == "2606:4700::2")' "$profiles/five/all.json" >/dev/null
+base64 -d "$profiles/five/all.sub" | cmp - "$dir/profiles/links.txt"
+[[ $(sha256sum "$dir/config.json") == "$(head -n1 <<<"$before")" ]]
 caddyfile="$test_dir/Caddyfile"
 cat >"$caddyfile" <<'CADDY'
 example.com:8443 {

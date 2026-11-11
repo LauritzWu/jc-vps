@@ -24,7 +24,7 @@ for file in manager.sh client-template.json; do
     curl -4 -fsSL --retry 2 --connect-timeout 8 --max-time 25 "$source_url/$file" -o "$dir/$file"
 done
 (cd "$dir" && sha256sum -c <<'SHA256'
-59baa126e47ba1a2d0de823c4e54cb09895cd18ca077d613ca0784fa55a9f777  manager.sh
+90d7872e12516b25538906e39c2cf153a405ef7a8e472497e3e6439422741393  manager.sh
 d96d8e1440c7b53ef47625820c77fe58c95a4ff0cef1f989d68c53ff099a7d7b  client-template.json
 SHA256
 )
@@ -242,6 +242,25 @@ choose() {
     selection=${selection:-$1}
 }
 
+address_menu() {
+    local selection address
+    heading '刷新节点地址'
+    option 1 '检测公网 IPv4'
+    option 2 '检测公网 IPv6'
+    option 3 '手动输入公网地址'
+    choose 0
+    case "$selection" in
+        0) return ;;
+        1) address=--ipv4 ;;
+        2) address=--ipv6 ;;
+        3)
+            read -r -p '公网 IPv4 或 IPv6（0 返回）：' address </dev/tty || return
+            [[ $address != 0 ]] || return ;;
+        *) echo '无效选项。'; return ;;
+    esac
+    duo five-address "$address" || true
+}
+
 client_menu() {
     local default_option
     while true; do
@@ -249,6 +268,7 @@ client_menu() {
         option 1 '查看五协议节点链接和二维码'
         option 2 '发布五协议单节点及聚合订阅'
         option 3 '查看五协议客户端验收步骤'
+        option 4 '刷新节点地址（IPv4 / IPv6）'
         default_option=3
         if [[ -s /etc/$five_service/profiles/links.txt ]]; then default_option=1; fi
         choose "$default_option"
@@ -259,6 +279,7 @@ client_menu() {
             3) printf '%s\n' '导入五协议节点链接，或将 sing-box JSON 导入客户端。' \
                    '逐条切换为活动节点并打开网页，确认连接和出口地址。' \
                    '实测通过后，可在「服务管理」启用五协议开机启动。' ;;
+            4) address_menu ;;
             *) echo '无效选项。' ;;
         esac
     done

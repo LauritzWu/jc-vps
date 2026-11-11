@@ -324,9 +324,17 @@ check() { "$core" check -c "$1"; }
 created=() started=()
 upgrade_backup='' upgrade_running=()
 port_backup='' port_paths=()
+address_backup='' address_paths=()
 cleanup() {
     local code=$? name recovered=true
     if (( code != 0 )); then
+        if [[ -n $address_backup ]]; then
+            if restore_five_files "$address_backup" "${address_paths[@]}"; then
+                printf '已恢复原节点链接和订阅。备份位于 %s\n' "$address_backup" >&2
+            else
+                printf '自动恢复未完成，备份位于 %s\n' "$address_backup" >&2
+            fi
+        fi
         if [[ -n $port_backup ]]; then
             if restore_five_port; then
                 printf '已恢复原监听端口和客户端配置。备份位于 %s\n' "$port_backup" >&2
@@ -568,11 +576,19 @@ put_port_file() {
     fi
 }
 
-restore_five_port() {
-    local i restored=true
-    for i in "${!port_paths[@]}"; do
-        put_port_file "${port_paths[i]}" <"$port_backup/$i" || restored=false
+restore_five_files() {
+    local backup=$1 i restored=true
+    shift
+    local paths=("$@")
+    for i in "${!paths[@]}"; do
+        put_port_file "${paths[i]}" <"$backup/$i" || restored=false
     done
+    "$restored"
+}
+
+restore_five_port() {
+    local restored=true
+    restore_five_files "$port_backup" "${port_paths[@]}" || restored=false
     restart_managed "$five" || restored=false
     "$restored"
 }
@@ -663,6 +679,96 @@ change_five_port() {
     if [[ $kind == reality ]]; then
         echo '若订阅使用 REALITY 入口，请在「客户端与订阅」→「发布五协议单节点及聚合订阅」查看并更新订阅地址。'
     fi
+}
+
+change_five_address() {
+    local requested=$1 config dir old host bind domain answer uri old_uri label ext i link authority file scheme
+    local links=() files=()
+    config=$(cfg "$five")
+    dir="$(dirname -- "$config")/profiles"
+    [[ -s $config && -s $dir/all.json ]] || fail '请先完成五协议安装'
+    old=$(jq -er '[.outbounds[] | select(has("server_port")) | .server] | unique |
+        if length == 1 then .[0] else error("节点地址不一致") end' "$dir/all.json")
+    host=$requested
+    case "$requested" in
+        --ipv4|--ipv6)
+            local family=4
+            if [[ $requested == --ipv6 ]]; then family=6; fi
+            host=$(curl --noproxy '*' "-$family" -fsS --connect-timeout 3 --max-time 6 https://ipwho.is/ |
+                jq -er 'select(.success == true) | .ip') || fail '公网 IP 检测失败，请手动输入公网地址'
+            if [[ $family == 4 && $host == *:* || $family == 6 && $host != *:* ]]; then
+                fail '检测结果的地址类型与所选模式不一致，请手动输入'
+            fi ;;
+    esac
+    valid_node_address "$host"
+    if [[ $host == "$old" ]]; then printf '节点已使用 %s。\n' "$host"; return; fi
+    bind=0.0.0.0; uri=$host; old_uri=$old
+    if [[ $host == *:* ]]; then bind=::; uri="[$host]"; fi
+    if [[ $old == *:* ]]; then old_uri="[$old]"; fi
+    jq -e --arg bind "$bind" '.inbounds | length == 5 and all(.[]; .listen == $bind)' "$config" >/dev/null ||
+        fail '当前五协议监听未配置为所选地址族。请先配置相应监听，再刷新节点地址'
+    printf '原节点地址 %s\n新节点地址 %s\n' "$old" "$host"
+    printf '将更新链接及已发布订阅，请确认新地址可从公网访问。\n'
+    read -r -p '确认刷新？[y/N] ' answer || return 0
+    [[ $answer == [yY] ]] || { echo '已取消刷新。'; return; }
+
+    mkdir "$scratch/address"
+    mapfile -t links <"$dir/links.txt"
+    [[ ${#links[@]} == ${#kinds[@]} ]] || fail '五协议链接文件不完整'
+    for i in "${!kinds[@]}"; do
+        label=${kinds[i]}
+        link=${links[i]}
+        if [[ $label == vmess ]]; then
+            [[ $link == vmess://* ]] || fail 'VMess 链接格式无效'
+            links[i]=$(printf '%s\n' "${link#vmess://}" | jq -Rer --arg old "$old" --arg host "$host" '
+                @base64d | fromjson | if .add == $old then .add=$host else error("节点地址不一致") end |
+                "vmess://" + (tojson | @base64)')
+        else
+            scheme=$label
+            case "$label" in reality) scheme=vless ;; hy2) scheme=hysteria2 ;; esac
+            authority=${link%%\?*}
+            [[ $link == "$scheme://"*"@"*"?"* && ${authority##*@} == "$old_uri:"* ]] ||
+                fail '分享链接的协议或地址不一致'
+            links[i]="${authority%@*}@$uri:${authority##*:}?${link#*\?}"
+        fi
+        { printf '%s\n' "${links[i]}" | base64 -w0; printf '\n'; } >"$scratch/address/$label.sub"
+    done
+    printf '%s\n' "${links[@]}" >"$scratch/address/links.txt"
+    { base64 -w0 "$scratch/address/links.txt"; printf '\n'; } >"$scratch/address/all.sub"
+
+    domain=$(jq -er '.inbounds[] | select(.type=="vmess") | .tls.server_name' "$config")
+    valid_domain "$domain"
+    files=("$dir/links.txt")
+    for label in "${kinds[@]}" all; do
+        jq -e --arg old "$old" --arg host "$host" --arg label "$label" '
+            [.outbounds[] | select(has("server_port"))] as $nodes |
+            if ($nodes | length) != (if $label == "all" then 5 else 1 end) or
+               any($nodes[]; .server != $old) then error("客户端配置地址不一致")
+            else .outbounds |= map(if has("server_port") then .server=$host else . end) end
+        ' "$dir/$label.json" >"$scratch/address/$label.json"
+        check "$scratch/address/$label.json"
+        for ext in json sub; do
+            files+=("$dir/$label.$ext")
+            file="$profiles/five/$label.$ext"
+            if [[ -f $file ]]; then
+                auth_required "$domain" "/profiles/five/$label.$ext"
+                files+=("$file")
+            fi
+        done
+    done
+
+    local backup
+    backup=$(mktemp -d "$(dirname -- "$config")/address-before.XXXXXX")
+    printf '%s\n' "${files[@]}" >"$backup/paths"
+    for i in "${!files[@]}"; do private_put "$backup/$i" <"${files[i]}"; done
+    address_paths=("${files[@]}")
+    address_backup=$backup
+    for file in "${files[@]}"; do
+        put_port_file "$file" <"$scratch/address/${file##*/}" || fail '更新客户端配置失败，正在回退'
+    done
+    address_backup=''
+    printf '节点地址已刷新。备份位于 %s\n' "$backup"
+    echo '请重新导入节点或刷新订阅，并核对订阅域名的 A/AAAA 记录。'
 }
 
 print_link() { printf '%s%s%s\n' "$yellow" "$1" "$reset"; }
@@ -858,6 +964,7 @@ JC
   five DOMAIN IP [--ports P1,P2,P3,P4,P5] [--uuid UUID] [--reality-target DOMAIN] [--template FILE]
   five-share [--publish]
   five-port PROTOCOL PORT
+  five-address IP|--ipv4|--ipv6
 HELP
 }
 
@@ -896,6 +1003,7 @@ case "$command_name" in
     five-share)
         [[ $# == 0 || ( $# == 1 && $1 == --publish ) ]] || fail '用法 five-share [--publish]'
         five_share "$@";;
+    five-address) [[ $# == 1 ]] || fail '用法 five-address IP|--ipv4|--ipv6'; change_five_address "$1";;
     five-port) [[ $# == 2 ]] || fail '用法 five-port PROTOCOL PORT'; change_five_port "$@";;
     five)
         [[ $# -ge 2 ]] || fail '缺少域名或公网节点地址'
