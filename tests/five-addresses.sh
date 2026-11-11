@@ -218,4 +218,9 @@ done
     result=''
     choose_preset_reality result apple.com aws.amazon.com
     [[ $result == aws.amazon.com && ${#choices[@]} == 0 && ${probes[*]} == "apple.com aws.amazon.com" ]]
+    result=''
+    probes=()
+    choose() { echo 'Auto mode prompted for a REALITY target' >&2; exit 1; }
+    choose_preset_reality result --auto apple.com aws.amazon.com
+    [[ $result == aws.amazon.com && ${probes[*]} == "apple.com aws.amazon.com" ]]
 )

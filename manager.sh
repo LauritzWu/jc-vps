@@ -58,6 +58,18 @@ valid_node_address() {
     ip -6 route get "$1" >/dev/null 2>&1 ||
         fail 'IPv6 地址无效或 VPS 无 IPv6 路由'
 }
+detect_public_address() {
+    local family=$1 host
+    [[ $family == 4 || $family == 6 ]] || fail '请选择 IPv4 或 IPv6'
+    host=$(curl --noproxy '*' "-$family" -fsS --connect-timeout 3 --max-time 6 https://ipwho.is/ |
+        jq -er 'select(.success == true) | .ip') || fail '公网 IP 检测失败，请手动输入公网地址'
+    if [[ $family == 4 && $host == *:* || $family == 6 && $host != *:* ]]; then
+        fail '检测结果的地址类型与所选模式不一致，请手动输入'
+    fi
+    valid_node_address "$host"
+    printf '%s\n' "$host"
+}
+
 site_curl() {
     curl --noproxy '*' --max-time 8 --resolve "$1:8443:127.0.0.1" "${@:3}" "https://$1:8443$2"
 }
@@ -751,14 +763,7 @@ change_five_address() {
         if length == 1 then .[0] else error("节点地址不一致") end' "$dir/all.json")
     host=$requested
     case "$requested" in
-        --ipv4|--ipv6)
-            local family=4
-            if [[ $requested == --ipv6 ]]; then family=6; fi
-            host=$(curl --noproxy '*' "-$family" -fsS --connect-timeout 3 --max-time 6 https://ipwho.is/ |
-                jq -er 'select(.success == true) | .ip') || fail '公网 IP 检测失败，请手动输入公网地址'
-            if [[ $family == 4 && $host == *:* || $family == 6 && $host != *:* ]]; then
-                fail '检测结果的地址类型与所选模式不一致，请手动输入'
-            fi ;;
+        --ipv4|--ipv6) host=$(detect_public_address "${requested: -1}") || exit 1 ;;
     esac
     valid_node_address "$host"
     if [[ $host == "$old" ]]; then printf '节点已使用 %s。\n' "$host"; return; fi
@@ -1080,6 +1085,11 @@ if [[ $command_name == reality-probe ]]; then
     valid_domain "$1"
     if [[ $# == 2 ]]; then valid_domain "$2"; fi
     reality_target_ready "$@"
+    exit
+fi
+if [[ $command_name == detect-address ]]; then
+    [[ $# == 1 ]] || fail '缺少地址族'
+    detect_public_address "$1"
     exit
 fi
 if [[ $command_name == five-summary ]]; then five_summary; exit; fi

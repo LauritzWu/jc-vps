@@ -24,7 +24,7 @@ for file in manager.sh client-template.json; do
     curl -4 -fsSL --retry 2 --connect-timeout 8 --max-time 25 "$source_url/$file" -o "$dir/$file"
 done
 (cd "$dir" && sha256sum -c <<'SHA256'
-0eb20a93016263ffe1eabe68de6200ff76bd166049ba1aae79a47546f65342a5  manager.sh
+059f00a40ab19d131f519a68a8138280d4889d1e0c4ee3a9f1c79d2ca8b592cf  manager.sh
 d96d8e1440c7b53ef47625820c77fe58c95a4ff0cef1f989d68c53ff099a7d7b  client-template.json
 SHA256
 )
@@ -90,21 +90,24 @@ choose_preset_name() {
 
 choose_preset_reality() {
     local -n target=$1
-    local selection candidate i preferred
+    local selection candidate i preferred='' auto=false
     shift
+    if [[ ${1:-} == --auto ]]; then auto=true; shift; fi
     local candidates=("$@")
-    heading 'VLESS · REALITY 握手目标'
-    for i in "${!candidates[@]}"; do option "$((i + 1))" "${candidates[i]}"; done
-    option 9 '自动探测可用目标'
-    while true; do
-        choose 9
-        case "$selection" in
-            0) return 1 ;;
-            9) preferred=''; break ;;
-            [1-8]) preferred=${candidates[selection-1]}; break ;;
-            *) echo '无效选项。' ;;
-        esac
-    done
+    if ! $auto; then
+        heading 'VLESS · REALITY 握手目标'
+        for i in "${!candidates[@]}"; do option "$((i + 1))" "${candidates[i]}"; done
+        option 9 '自动探测可用目标'
+        while true; do
+            choose 9
+            case "$selection" in
+                0) return 1 ;;
+                9) preferred=''; break ;;
+                [1-8]) preferred=${candidates[selection-1]}; break ;;
+                *) echo '无效选项。' ;;
+            esac
+        done
+    fi
     if [[ -n $preferred ]]; then
         if duo reality-probe "$preferred"; then
             target=$preferred
@@ -126,7 +129,8 @@ choose_preset_reality() {
 
 quick_install() {
     local domain ip ports='' uuid version='' answer port protocol resolved started reality_target='' target_index candidate
-    local mode=1 reality_sni='' preset_names='' preset_name
+    local mode=1 reality_sni='' preset_names='' preset_name automatic=false
+    local reality_args=()
     local preset_values=() package_args=()
     local reality_targets=(aws.amazon.com www.microsoft.com www.cloudflare.com www.amazon.com dl.google.com www.samsung.com www.intel.com)
     local protocol_ports=() protocol_labels=('VLESS / REALITY (TCP)' 'VMess WS (TCP)' 'Hysteria 2 (UDP)' 'TUIC (UDP)' 'AnyTLS (TCP)')
@@ -156,7 +160,7 @@ quick_install() {
     esac
     heading '2/5  域名和证书'
     option 1 '自有域名与公信证书'
-    option 2 '无自有域名 · 按协议选择预设'
+    option 2 '无自有域名 · 全自动自签'
     choose 1
     case "$selection" in
         0) return 0 ;;
@@ -166,16 +170,33 @@ quick_install() {
     if [[ $mode == 2 ]]; then
         domain=-
         package_args=(--no-caddy)
-        choose_preset_reality reality_target apple.com "${reality_targets[@]}" || {
+        option 1 '全自动（优先 IPv4，失败时尝试 IPv6）'
+        option 2 '高级调整（手动填写 IPv4 / IPv6，按协议选站点）'
+        choose 1
+        case "$selection" in
+            0) return 0 ;;
+            1)
+                automatic=true
+                reality_args=(--auto)
+                ip=$(duo detect-address 4 2>/dev/null) || ip=$(duo detect-address 6 2>/dev/null) ||
+                    { echo '无法自动检测公网 IP，请返回模式二并选择高级调整。'; return 1; }
+                preset_values=(www.bing.com www.bing.com www.bing.com www.bing.com)
+                ;;
+            2) ;;
+            *) echo '无效选项。'; return 1 ;;
+        esac
+        choose_preset_reality reality_target "${reality_args[@]}" apple.com "${reality_targets[@]}" || {
             [[ $? == 1 ]] && return 0
             return 1
         }
-        printf '已选 REALITY 目标与 SNI：%s\n' "$reality_target"
-        for protocol in 'VMess WS Host' 'Hysteria 2 SNI' 'TUIC SNI' 'AnyTLS SNI'; do
-            heading "$protocol"
-            choose_preset_name preset_name www.bing.com www.microsoft.com www.cloudflare.com www.amazon.com || return 0
-            preset_values+=("$preset_name")
-        done
+        if ! $automatic; then
+            printf '已选 REALITY 目标与 SNI：%s\n' "$reality_target"
+            for protocol in 'VMess WS Host' 'Hysteria 2 SNI' 'TUIC SNI' 'AnyTLS SNI'; do
+                heading "$protocol"
+                choose_preset_name preset_name www.bing.com www.microsoft.com www.cloudflare.com www.amazon.com || return 0
+                preset_values+=("$preset_name")
+            done
+        fi
         preset_names=$(IFS=,; printf '%s' "${preset_values[*]}")
     else
         heading 'REALITY 握手目标'
@@ -231,22 +252,24 @@ quick_install() {
             return 1
         fi
     fi
-    read -r -p 'VPS 公网 IPv4 或 IPv6（0 返回）：' ip </dev/tty || return 1
-    [[ $ip != 0 ]] || return 0
-    duo validate-install "$domain" "$ip" || return 1
-
-    heading '3/5  五协议端口'
-    option 1 '自动选择五个可用端口'
-    option 2 '手动指定五个端口'
-    choose 1
-    case "$selection" in
-        0) return 0 ;;
-        1|2) port_mode=$selection ;;
-        *) echo '无效选项。'; return 1 ;;
-    esac
-    if [[ $port_mode == 2 ]]; then
-        echo '每项回车自动选择 10000–65535 内的可用端口，输入 0 返回。'
+    port_mode=1
+    if ! $automatic; then
+        read -r -p 'VPS 公网 IPv4 或 IPv6（0 返回）：' ip </dev/tty || return 1
+        [[ $ip != 0 ]] || return 0
+        heading '3/5  五协议端口'
+        option 1 '自动选择五个可用端口'
+        option 2 '手动指定五个端口'
+        choose 1
+        case "$selection" in
+            0) return 0 ;;
+            1|2) port_mode=$selection ;;
+            *) echo '无效选项。'; return 1 ;;
+        esac
+        if [[ $port_mode == 2 ]]; then
+            echo '每项回车自动选择 10000–65535 内的可用端口，输入 0 返回。'
+        fi
     fi
+    duo validate-install "$domain" "$ip" || return 1
     for index in "${!protocol_labels[@]}"; do
         protocol=${protocol_labels[index]}
         port=''
@@ -265,24 +288,28 @@ quick_install() {
         fi
         if [[ -z $port ]]; then
             port=$(duo pick-port "${transports[index]}" "${protocol_ports[@]}") || return 1
-            printf '  %s 已自动选定：%s%s%s\n' "$protocol" "$green" "$port" "$reset"
+            if ! $automatic; then printf '  %s 已自动选定：%s%s%s\n' "$protocol" "$green" "$port" "$reset"; fi
         fi
         protocol_ports+=("$port")
     done
     ports=$(IFS=,; printf '%s' "${protocol_ports[*]}")
-    heading '4/5  节点凭据'
-    option 1 '自动生成 UUID（回车默认）'
-    option 2 '自定义 UUID'
-    choose 1
-    case "$selection" in
-        0) return 0 ;;
-        1) read -r uuid </proc/sys/kernel/random/uuid || return 1 ;;
-        2)
-            read -r -p "${yellow}请输入 UUID（0 返回）：$reset" uuid </dev/tty || return 1
-            [[ $uuid != 0 ]] || return 0
-            [[ -n $uuid ]] || { echo 'UUID 不能为空。'; return 1; } ;;
-        *) echo '无效选项。'; return 1 ;;
-    esac
+    if $automatic; then
+        read -r uuid </proc/sys/kernel/random/uuid || return 1
+    else
+        heading '4/5  节点凭据'
+        option 1 '自动生成 UUID（回车默认）'
+        option 2 '自定义 UUID'
+        choose 1
+        case "$selection" in
+            0) return 0 ;;
+            1) read -r uuid </proc/sys/kernel/random/uuid || return 1 ;;
+            2)
+                read -r -p "${yellow}请输入 UUID（0 返回）：$reset" uuid </dev/tty || return 1
+                [[ $uuid != 0 ]] || return 0
+                [[ -n $uuid ]] || { echo 'UUID 不能为空。'; return 1; } ;;
+            *) echo '无效选项。'; return 1 ;;
+        esac
+    fi
     duo validate-install "$domain" "$ip" "$ports" "$uuid" || return 1
     printf '已确认 UUID：%s%s%s\n' "$green" "$uuid" "$reset"
     heading '5/5  确认安装'
