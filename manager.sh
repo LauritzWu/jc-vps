@@ -900,15 +900,30 @@ five_share() {
     if [[ -z $domain ]]; then
         [[ ${1:-} != --publish ]] || fail '无自有域名模式请使用本地配置导出'
         refresh_five_aliases "$dir"
+        local links=() fingerprint
+        mapfile -t links <"$dir/links.txt"
+        if [[ ${1:-} == --v2rayn ]]; then
+            echo '兼容链接会让 TUIC 和 AnyTLS 跳过服务器证书验证。请仅在确认风险后导入。'
+            local answer
+            read -r -p '生成兼容链接？[y/N] ' answer || return 0
+            [[ $answer == [yY] ]] || return 0
+            fingerprint=$(openssl x509 -in "$(dirname -- "$dir")/local-tls.crt" -outform DER |
+                sha256sum | cut -d' ' -f1) || fail '无法读取服务器证书指纹'
+            links[2]="${links[2]%#*}&pinSHA256=$fingerprint#${links[2]##*#}"
+            links[3]="${links[3]%#*}&allow_insecure=1#${links[3]##*#}"
+            links[4]="${links[4]%#*}&insecure=1#${links[4]##*#}"
+            echo 'HY2 链接包含证书指纹。请用 v2rayN 导入后分别测试连接。'
+        else
+            echo 'VLESS、VMess 可直接导入；HY2、TUIC、AnyTLS 扫码后须配置服务器证书，或直接导入下方 sing-box JSON。'
+        fi
         printf '五协议节点链接与二维码（含凭据）\n'
-        echo 'VLESS、VMess 可直接导入；HY2、TUIC、AnyTLS 扫码后须配置服务器证书，或直接导入下方 sing-box JSON。'
-        while IFS= read -r link; do
+        for link in "${links[@]}"; do
             printf '\n[%s]\n' "${aliases[i]}"
             show_qr "$link"
             i=$((i+1))
-        done <"$dir/links.txt"
+        done
         printf '\n全部节点链接（每行一个）\n'
-        while IFS= read -r link; do print_link "$link"; done <"$dir/links.txt"
+        for link in "${links[@]}"; do print_link "$link"; done
         printf '\n本地 sing-box 配置（通过 SSH 下载）\n'
         for i in "${!kinds[@]}"; do
             printf '  %-25s %s/%s.json\n' "${aliases[i]}" "$dir" "${kinds[i]}"
@@ -918,6 +933,7 @@ five_share() {
         echo '本模式通过本地配置导入。HTTPS 单节点和聚合订阅请使用自有域名模式。'
         return
     fi
+    [[ ${1:-} != --v2rayn ]] || fail '兼容链接仅用于无自有域名模式'
     valid_domain "$domain"
     port=$(jq -er '.inbounds[0].listen_port' "$(cfg "$five")")
     port_number "$port" || fail 'REALITY 端口无效'
@@ -1048,7 +1064,7 @@ JC
   site DOMAIN
   status [DOMAIN]
   five DOMAIN|- IP [--ports P1,P2,P3,P4,P5] [--uuid UUID] [--reality-target DOMAIN] [--reality-sni DOMAIN] [--preset-names HOST,HY2,TUIC,ANYTLS] [--template FILE]
-  five-share [--publish]
+  five-share [--publish|--v2rayn]
   five-port PROTOCOL PORT
   five-address IP|--ipv4|--ipv6
 HELP
@@ -1094,7 +1110,7 @@ case "$command_name" in
         ip -6 addr show scope global
         if (( $# )); then valid_domain "$1"; getent ahosts "$1"; site_curl "$1" / -fsS; printf '\n'; fi;;
     five-share)
-        [[ $# == 0 || ( $# == 1 && $1 == --publish ) ]] || fail '用法 five-share [--publish]'
+        [[ $# == 0 || ( $# == 1 && ( $1 == --publish || $1 == --v2rayn ) ) ]] || fail '用法 five-share [--publish|--v2rayn]'
         five_share "$@";;
     five-address) [[ $# == 1 ]] || fail '用法 five-address IP|--ipv4|--ipv6'; change_five_address "$1";;
     five-port) [[ $# == 2 ]] || fail '用法 five-port PROTOCOL PORT'; change_five_port "$@";;

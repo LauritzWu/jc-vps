@@ -24,7 +24,7 @@ for file in manager.sh client-template.json; do
     curl -4 -fsSL --retry 2 --connect-timeout 8 --max-time 25 "$source_url/$file" -o "$dir/$file"
 done
 (cd "$dir" && sha256sum -c <<'SHA256'
-92922e9e4f7324cc48c926d66bf10c06ab7e42bf9cfc65a8faa096dcaefeb876  manager.sh
+0eb20a93016263ffe1eabe68de6200ff76bd166049ba1aae79a47546f65342a5  manager.sh
 d96d8e1440c7b53ef47625820c77fe58c95a4ff0cef1f989d68c53ff099a7d7b  client-template.json
 SHA256
 )
@@ -372,6 +372,7 @@ client_menu() {
         option 2 '发布五协议单节点及聚合订阅'
         option 3 '查看五协议客户端验收步骤'
         option 4 '刷新节点地址（IPv4 / IPv6）'
+        if [[ -s /etc/$five_service/local-tls.crt ]]; then option 5 'v2rayN 兼容链接与二维码（自签模式）'; fi
         default_option=3
         if [[ -s /etc/$five_service/profiles/links.txt ]]; then default_option=1; fi
         choose "$default_option"
@@ -383,6 +384,7 @@ client_menu() {
                    '逐条切换为活动节点并打开网页，确认连接和出口地址。' \
                    '实测通过后，可在「服务管理」启用五协议开机启动。' ;;
             4) address_menu ;;
+            5) duo five-share --v2rayn || true ;;
             *) echo '无效选项。' ;;
         esac
     done

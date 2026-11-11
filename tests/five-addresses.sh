@@ -182,6 +182,17 @@ for label in "${kinds[@]}" all; do
 done
 grep -F "$dir/local-tls.crt" <<<"$output" >/dev/null
 
+links_before=$(sha256sum "$dir/profiles/links.txt" "$dir/profiles/all.json")
+cancelled=$(five_share --v2rayn <<<n)
+[[ $cancelled != *'QR '* ]]
+output=$(five_share --v2rayn <<<y)
+fingerprint=$(openssl x509 -in "$dir/local-tls.crt" -outform DER | sha256sum | cut -d' ' -f1)
+[[ $(grep -c '^QR ' <<<"$output") == 5 ]]
+grep -Eq "^hysteria2://.*&pinSHA256=$fingerprint#" <<<"$output"
+grep -Eq '^tuic://.*&allow_insecure=1#' <<<"$output"
+grep -Eq '^anytls://.*&insecure=1#' <<<"$output"
+[[ $(sha256sum "$dir/profiles/links.txt" "$dir/profiles/all.json") == "$links_before" ]]
+
 for bad in '[2606:4700::1]' '2606::::1' 'fe80::1' '::1'; do
     if (valid_node_address "$bad") >/dev/null 2>&1; then
         printf 'Accepted invalid node address %s\n' "$bad" >&2
