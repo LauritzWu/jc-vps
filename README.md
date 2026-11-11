@@ -2,23 +2,25 @@
 
 面向个人 VPS 的 sing-box 管理工具。使用官方 APT 版 sing-box，提供五协议安装向导，支持选择 IPv4 或 IPv6 节点地址，并可发布带密码的 HTTPS 订阅。
 
-## 一键安装 v1.2.0
+## 一键安装 v1.3.0
 
 在 VPS 的 root Bash 会话中运行。入口需要 curl。安装脚本、管理脚本、客户端模板和后续的 `jc` 命令均使用同一提交。
 
 ```bash
-revision=27c778b721f5ae6cef9b77d78c493a209a9ee8f0
+revision=1429029b3d2b1b476d46601557e10622d3dddd23
 s=$(curl -4fsSL -m 25 "https://raw.githubusercontent.com/LauritzWu/jc-vps/$revision/bootstrap.sh") &&
   bash -c "$s" -- "$revision"
 ```
 
-主菜单选「1 一键安装 sing-box」或直接回车。确认安装时回车继续，安装完成后回车查看节点。详见 [v1.2.0 发布说明](https://github.com/LauritzWu/jc-vps/releases/tag/v1.2.0)。
+新部署可选「1 一键安装 sing-box」或直接回车。已有部署运行上述命令即可更新管理入口，节点无需重装。详见 [v1.3.0 发布说明](https://github.com/LauritzWu/jc-vps/releases/tag/v1.3.0)。
+
+**v1.3.0 实测**覆盖公信证书模式的全新 Let’s Encrypt 签发、自动开机自启，以及重启后五协议公网代理请求。自签模式通过 v2rayN 五协议测速，并通过重启后使用 sing-box JSON 的五协议公网代理请求。本轮 HTTPS 订阅的端到端回归留待单独验收。
 
 **已验收范围**为 Ubuntu 24.04 LTS 和 Debian 13，均为 x86_64、IPv4。五个协议均通过公网连通测试，两套系统也通过了公信证书签发、订阅认证、重启恢复、内核切换和失败回退，以及卸载重装。五协议也已通过公网 IPv6 连通测试，IPv6 订阅已在隔离环境验收，分享链接已通过 v2rayN 导入检查。详见 [v1.1.0 发布说明](https://github.com/LauritzWu/jc-vps/releases/tag/v1.1.0)。
 
 首页包含服务状态、服务管理、客户端与订阅、网络与防火墙和系统工具。支持数字选择和子菜单按 0 返回。主菜单在未部署时回车进入安装，已部署时需输入 0–7 的菜单序号，直接回车会再次提示。底部显示系统、接口地址和服务状态。安装后，首页还显示五个节点的配置端口、REALITY SNI、TLS 证书有效期和本机订阅发布状态。在「3 服务状态」可查看本机监听和最近 50 条运行日志。服务器地区通过 ipwho.is 按 VPS 公网出口 IP 查询并缓存 24 小时。在「系统工具 → 手动覆盖服务器地区」可手动设置，已保存的地区优先使用。
 
-首次运行自动安装 `jc` 快捷命令，并通过 APT 补齐缺失的 jq、qrencode、OpenSSL、iproute2 和 flock。在支持大小写快捷命令的版本中，输入 `jc` 或 `JC` 都可打开菜单。已有 `duo` 的用户可运行一次 `duo`，新版会自动安装 `jc`。主菜单选「一键安装 sing-box」，按顺序选择内核、输入域名和公网节点地址（IPv4 或 IPv6）、分配端口、生成或填写 UUID，最后确认安装。
+首次运行自动安装 `jc` 快捷命令，并通过 APT 补齐缺失的 jq、qrencode、OpenSSL、iproute2 和 flock。输入 `jc` 或 `JC` 都可打开菜单。已有 `duo` 的用户可运行一次 `duo`，新版会自动安装 `jc`。主菜单选「一键安装 sing-box」，按顺序选择内核、输入域名和公网节点地址（IPv4 或 IPv6）、分配端口、生成或填写 UUID，最后确认安装。
 
 ## 卸载和重装
 
