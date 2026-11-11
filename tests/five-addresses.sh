@@ -204,14 +204,18 @@ done
     source <(sed -n '/^choose_preset_reality()/,/^quick_install()/ { /^quick_install()/d; p; }' "$root/bootstrap.sh")
     heading() { :; }
     option() { :; }
-    choices=(1 9)
+    choices=(1)
     choose() {
         [[ $1 == 9 ]]
         selection=${choices[0]}
         choices=("${choices[@]:1}")
     }
-    duo() { [[ $1 == reality-probe && $2 == aws.amazon.com ]]; }
+    probes=()
+    duo() {
+        probes+=("$2")
+        [[ $1 == reality-probe && $2 == aws.amazon.com ]]
+    }
     result=''
     choose_preset_reality result apple.com aws.amazon.com
-    [[ $result == aws.amazon.com && ${#choices[@]} == 0 ]]
+    [[ $result == aws.amazon.com && ${#choices[@]} == 0 && ${probes[*]} == "apple.com aws.amazon.com" ]]
 )

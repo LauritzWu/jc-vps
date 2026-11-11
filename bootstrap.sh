@@ -90,37 +90,38 @@ choose_preset_name() {
 
 choose_preset_reality() {
     local -n target=$1
-    local selection candidate i
+    local selection candidate i preferred
     shift
     local candidates=("$@")
+    heading 'VLESS · REALITY 握手目标'
+    for i in "${!candidates[@]}"; do option "$((i + 1))" "${candidates[i]}"; done
+    option 9 '自动探测可用目标'
     while true; do
-        heading 'VLESS · REALITY 握手目标'
-        for i in "${!candidates[@]}"; do option "$((i + 1))" "${candidates[i]}"; done
-        option 9 '自动探测可用目标'
         choose 9
         case "$selection" in
             0) return 1 ;;
-            9)
-                echo '正在从 VPS 探测候选站点…'
-                for candidate in "${candidates[@]}"; do
-                    if duo reality-probe "$candidate"; then
-                        target=$candidate
-                        return 0
-                    fi
-                done
-                echo '候选站点均未通过探测。请检查 VPS 出站 TCP 443 和 DNS。'
-                ;;
-            [1-8])
-                candidate=${candidates[selection-1]}
-                if duo reality-probe "$candidate"; then
-                    target=$candidate
-                    return 0
-                fi
-                printf '%s 未通过 TLS 1.3 / HTTP/2 探测，请另选或按回车自动探测。\n' "$candidate"
-                ;;
+            9) preferred=''; break ;;
+            [1-8]) preferred=${candidates[selection-1]}; break ;;
             *) echo '无效选项。' ;;
         esac
     done
+    if [[ -n $preferred ]]; then
+        if duo reality-probe "$preferred"; then
+            target=$preferred
+            return 0
+        fi
+        printf '%s 未通过探测，自动尝试其他目标。\n' "$preferred"
+    fi
+    for candidate in "${candidates[@]}"; do
+        [[ $candidate != "$preferred" ]] || continue
+        printf '正在探测 %s…\n' "$candidate"
+        if duo reality-probe "$candidate"; then
+            target=$candidate
+            return 0
+        fi
+    done
+    echo '候选站点均未通过探测。请检查 VPS 出站 TCP 443 和 DNS。'
+    return 2
 }
 
 quick_install() {
@@ -165,7 +166,10 @@ quick_install() {
     if [[ $mode == 2 ]]; then
         domain=-
         package_args=(--no-caddy)
-        choose_preset_reality reality_target apple.com "${reality_targets[@]}" || return 0
+        choose_preset_reality reality_target apple.com "${reality_targets[@]}" || {
+            [[ $? == 1 ]] && return 0
+            return 1
+        }
         printf '已选 REALITY 目标与 SNI：%s\n' "$reality_target"
         for protocol in 'VMess WS Host' 'Hysteria 2 SNI' 'TUIC SNI' 'AnyTLS SNI'; do
             heading "$protocol"
