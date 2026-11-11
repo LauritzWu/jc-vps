@@ -357,10 +357,21 @@ quick_install() {
     duo five "$domain" "$ip" --ports "$ports" --uuid "$uuid" "${target_args[@]}" || return 1
     printf '\n%s五协议安装成功 · 本机监听已确认%s\n' "$green" "$reset"
     echo '请在云防火墙放行上面列出的 TCP/UDP 端口。外网验收通过后，在主菜单 4 启用开机启动。'
-    option 1 '查看节点链接和配置文件（含凭据）'
-    option 2 '稍后在客户端与订阅菜单查看'
-    choose 1
-    if [[ $selection == 1 ]]; then duo five-share || return 1; fi
+    if [[ $mode == 2 ]]; then
+        option 1 '生成 v2rayN 兼容链接和二维码（需确认）'
+        option 2 '查看普通链接和公钥固定 JSON'
+        option 3 '稍后查看'
+        choose 1
+        case "$selection" in
+            1) duo five-share --v2rayn || return 1 ;;
+            2) duo five-share || return 1 ;;
+        esac
+    else
+        option 1 '查看节点链接和配置文件（含凭据）'
+        option 2 '稍后在客户端与订阅菜单查看'
+        choose 1
+        if [[ $selection == 1 ]]; then duo five-share || return 1; fi
+    fi
 }
 
 if [[ -t 1 && "${TERM:-dumb}" != dumb && -z "${NO_COLOR:-}" ]]; then
