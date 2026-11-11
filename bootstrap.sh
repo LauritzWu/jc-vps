@@ -127,6 +127,10 @@ choose_preset_reality() {
     return 2
 }
 
+five_deployed() {
+    [[ -e /etc/$five_service/config.json || -e /etc/systemd/system/$five_service.service ]]
+}
+
 quick_install() {
     local domain ip ports='' uuid version='' answer port protocol resolved started reality_target='' target_index candidate
     local mode=1 reality_sni='' preset_names='' preset_name automatic=false
@@ -136,7 +140,7 @@ quick_install() {
     local protocol_ports=() protocol_labels=('VLESS / REALITY (TCP)' 'VMess WS (TCP)' 'Hysteria 2 (UDP)' 'TUIC (UDP)' 'AnyTLS (TCP)')
     local selection port_mode index
     local transports=(tcp tcp udp udp tcp)
-    if [[ -e /etc/$five_service/config.json || -e /etc/systemd/system/$five_service.service ]]; then
+    if five_deployed; then
         echo '已检测到五协议配置。请到 4 管理服务，或到 5 查看节点与订阅。'
         return 0
     fi
@@ -803,7 +807,15 @@ while true; do
     width=$(home_width)
     home_banner "$width"
     heading '管理菜单'
-    option 1 '一键安装 sing-box' "$green"
+    default_option=1
+    default_label='1 安装'
+    if five_deployed; then
+        default_option=3
+        default_label='3 服务状态'
+        option 1 '一键安装 sing-box（五协议已部署）' "$green"
+    else
+        option 1 '一键安装 sing-box' "$green"
+    fi
     option 2 '完整卸载 sing-box 和 JC' "$red"
     option 3 '服务状态'
     option 4 '服务管理'
@@ -816,12 +828,12 @@ while true; do
     if [[ -s /etc/$five_service/config.json ]]; then
         heading '五协议节点 · 配置端口'
         duo five-summary || true
-    else
+    elif ! five_deployed; then
         printf '%s尚未部署 JC 节点，按 1 或回车安装。%s\n' "$yellow" "$reset"
     fi
     home_rule "$width"
-    read -r -p "${yellow}请选择 [回车默认 1 安装，0 退出]：$reset" selection </dev/tty || exit 1
-    case "${selection:-1}" in
+    read -r -p "${yellow}请选择 [回车默认 $default_label，0 退出]：$reset" selection </dev/tty || exit 1
+    case "${selection:-$default_option}" in
         1)
             quick_install || echo '安装未完成，请查看上面的报错。'
             pause_menu ;;
