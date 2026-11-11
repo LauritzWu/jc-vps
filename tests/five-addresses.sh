@@ -150,6 +150,29 @@ grep -F '已发布 · TCP 8443' <<<"$summary" >/dev/null
 rm -- "$profiles/five/all.sub"
 grep -F '未发布' <<<"$(five_summary)" >/dev/null
 
+scratch="$test_dir/scratch-preset"
+mkdir "$scratch"
+five=five-preset
+dpkg-query() { :; }
+five_deploy - "$ipv4" 8443,8444,8445,8446,8447 12345678-1234-1234-1234-123456789abc \
+    www.microsoft.com www.bing.com,www.bing.com,www.amazon.com,www.cloudflare.com
+dir="$test_dir/$five"
+pin=$(openssl x509 -in "$dir/local-tls.crt" -pubkey -noout | openssl pkey -pubin -outform der |
+    openssl dgst -sha256 -binary | openssl enc -base64)
+jq -e --arg pin "$pin" '
+    (.outbounds[] | select(.type=="vmess") | .transport.headers.Host == "www.bing.com" and (.tls | not)) and
+    ([.outbounds[] | select(.type=="hysteria2" or .type=="tuic" or .type=="anytls") | .tls.server_name] ==
+        ["www.bing.com","www.amazon.com","www.cloudflare.com"]) and
+    all(.outbounds[] | select(.type=="hysteria2" or .type=="tuic" or .type=="anytls");
+        .tls.certificate_public_key_sha256 == [$pin] and (.tls.insecure | not))
+' "$dir/profiles/all.json" >/dev/null
+sed -n 's/^vmess:\/\///p' "$dir/profiles/links.txt" | base64 -d |
+    jq -e '.host == "www.bing.com" and .tls == ""' >/dev/null
+if (five_share --publish) >/dev/null 2>&1; then
+    echo 'Preset mode offered HTTPS publication without a certificate domain' >&2
+    exit 1
+fi
+
 for bad in '[2606:4700::1]' '2606::::1' 'fe80::1' '::1'; do
     if (valid_node_address "$bad") >/dev/null 2>&1; then
         printf 'Accepted invalid node address %s\n' "$bad" >&2

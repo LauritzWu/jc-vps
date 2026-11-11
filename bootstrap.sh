@@ -24,7 +24,7 @@ for file in manager.sh client-template.json; do
     curl -4 -fsSL --retry 2 --connect-timeout 8 --max-time 25 "$source_url/$file" -o "$dir/$file"
 done
 (cd "$dir" && sha256sum -c <<'SHA256'
-7f4b134ab2bb18f1603efd7d46ad94ea50b61491907b35e570fa22a4baee1c06  manager.sh
+01d2d52f8322c87f94f99c150e8bfbf688328341ab21e48539cfc4a0e79dac4e  manager.sh
 d96d8e1440c7b53ef47625820c77fe58c95a4ff0cef1f989d68c53ff099a7d7b  client-template.json
 SHA256
 )
@@ -77,8 +77,21 @@ wait_for_certificate() {
     return 1
 }
 
+choose_preset_name() {
+    local -n chosen_name=$1
+    local selection i
+    shift
+    local candidates=("$@")
+    for i in "${!candidates[@]}"; do option "$((i + 1))" "${candidates[i]}"; done
+    choose 1
+    [[ $selection =~ ^[1-9]$ ]] && (( selection <= ${#candidates[@]} )) || return 1
+    chosen_name=${candidates[selection-1]}
+}
+
 quick_install() {
     local domain ip ports='' uuid version='' answer port protocol resolved started reality_target='' target_index candidate
+    local mode=1 reality_sni='' preset_names='' preset_name
+    local preset_values=() package_args=()
     local reality_targets=(aws.amazon.com www.microsoft.com www.cloudflare.com www.amazon.com dl.google.com www.samsung.com www.intel.com)
     local protocol_ports=() protocol_labels=('VLESS / REALITY (TCP)' 'VMess WS (TCP)' 'Hysteria 2 (UDP)' 'TUIC (UDP)' 'AnyTLS (TCP)')
     local selection port_mode index
@@ -90,7 +103,7 @@ quick_install() {
 
     heading '一键安装 sing-box · 五协议'
     printf '%s\n' 'REALITY / VMess WS + TLS / Hysteria 2 / TUIC / AnyTLS' \
-        '请将域名直接解析到 VPS，并在云防火墙放行 TCP 80 供 Caddy 签发或续期。'
+        '公信证书模式需要将站点域名解析到 VPS，并放行公网 TCP 80。'
     heading '1/5  官方内核'
     option 1 '使用已安装的官方内核；新机安装 APT 稳定版'
         option 2 '指定官方 APT 版本（运行中的 JC 服务会短暂重启）'
@@ -106,54 +119,80 @@ quick_install() {
         *) echo '无效选项。'; return 1 ;;
     esac
     heading '2/5  域名和证书'
-    option 1 '使用自己的域名作为 REALITY 目标'
-    option 2 '从常用站点手动选择 REALITY 目标'
-    option 3 '自动探测并选择常用 REALITY 目标'
-    option 4 '手动输入其他 REALITY 目标域名'
+    option 1 '自有域名与公信证书'
+    option 2 '无自有域名 · 按协议选择预设'
     choose 1
     case "$selection" in
         0) return 0 ;;
-        1) ;;
-        2)
-            heading 'REALITY 握手目标'
-            for target_index in "${!reality_targets[@]}"; do
-                option "$((target_index + 1))" "${reality_targets[target_index]}"
-            done
-            choose 0
-            case "$selection" in
-                0) return 0 ;;
-                [1-7]) reality_target=${reality_targets[selection-1]} ;;
-                *) echo '无效选项。'; return 1 ;;
-            esac
-            ;;
-        3)
-            echo '正在从 VPS 探测候选站点的 TLS 1.3 和 HTTP/2…'
-            for candidate in "${reality_targets[@]}"; do
-                if duo reality-probe "$candidate"; then
-                    reality_target=$candidate
-                    break
-                fi
-            done
-            [[ -n $reality_target ]] || { echo '暂未找到可用目标，请重试或手动选择。'; return 1; }
-            ;;
-        4)
-            read -r -p 'REALITY 目标域名（0 返回）：' reality_target </dev/tty || return 1
-            [[ $reality_target != 0 ]] || return 0
-            duo reality-probe "$reality_target" ||
-                { echo '目标未通过 TLS 1.3 和 HTTP/2 检查。'; return 1; }
-            ;;
+        1|2) mode=$selection ;;
         *) echo '无效选项。'; return 1 ;;
     esac
-    if [[ -n $reality_target ]]; then
-        printf 'REALITY 握手目标 %s:443 · REALITY SNI %s\n' "$reality_target" "$reality_target"
-        echo '请填写自己的站点域名，用于另外四个协议的 TLS 证书和 HTTPS 订阅。'
-    fi
-    read -r -p '自己的站点域名（0 返回）：' domain </dev/tty || return 1
-    [[ $domain != 0 ]] || return 0
-    [[ $domain =~ ^[a-z0-9][a-z0-9.-]*\.[a-z][a-z0-9-]*$ ]] || { echo '请输入有效的小写域名。'; return 1; }
-    if [[ $domain == "$reality_target" ]]; then
-        echo '站点域名和外部目标相同，请选择选项 1 使用本机 REALITY 目标。'
-        return 1
+    if [[ $mode == 2 ]]; then
+        domain=-
+        package_args=(--no-caddy)
+        heading 'VLESS · REALITY 握手目标'
+        choose_preset_name reality_target apple.com "${reality_targets[@]}" || return 0
+        duo reality-probe "$reality_target" ||
+            { echo 'REALITY 目标未通过探测，请重试并选择其他站点。'; return 1; }
+        for protocol in 'VMess WS Host' 'Hysteria 2 SNI' 'TUIC SNI' 'AnyTLS SNI'; do
+            heading "$protocol"
+            choose_preset_name preset_name www.bing.com www.microsoft.com www.cloudflare.com www.amazon.com || return 0
+            preset_values+=("$preset_name")
+        done
+        preset_names=$(IFS=,; printf '%s' "${preset_values[*]}")
+    else
+        heading 'REALITY 握手目标'
+        option 1 '使用自己的域名作为 REALITY 目标'
+        option 2 '从常用站点手动选择 REALITY 目标'
+        option 3 '自动探测并选择常用 REALITY 目标'
+        option 4 '手动输入其他 REALITY 目标域名'
+        choose 1
+        case "$selection" in
+            0) return 0 ;;
+            1) ;;
+            2)
+                heading 'REALITY 握手目标'
+                for target_index in "${!reality_targets[@]}"; do
+                    option "$((target_index + 1))" "${reality_targets[target_index]}"
+                done
+                choose 0
+                case "$selection" in
+                    0) return 0 ;;
+                    [1-7]) reality_target=${reality_targets[selection-1]} ;;
+                    *) echo '无效选项。'; return 1 ;;
+                esac
+                ;;
+            3)
+                echo '正在从 VPS 探测候选站点的 TLS 1.3 和 HTTP/2…'
+                for candidate in "${reality_targets[@]}"; do
+                    if duo reality-probe "$candidate"; then
+                        reality_target=$candidate
+                        break
+                    fi
+                done
+                [[ -n $reality_target ]] || { echo '暂未找到可用目标，请重试或手动选择。'; return 1; }
+                ;;
+            4)
+                read -r -p 'REALITY 目标域名（0 返回）：' reality_target </dev/tty || return 1
+                [[ $reality_target != 0 ]] || return 0
+                read -r -p "REALITY SNI（回车使用 $reality_target，0 返回）：" reality_sni </dev/tty || return 1
+                [[ $reality_sni != 0 ]] || return 0
+                duo reality-probe "$reality_target" "${reality_sni:-$reality_target}" ||
+                    { echo '目标未通过 TLS 1.3 和 HTTP/2 检查。'; return 1; }
+                ;;
+            *) echo '无效选项。'; return 1 ;;
+        esac
+        if [[ -n $reality_target ]]; then
+            printf 'REALITY 握手目标 %s:443 · REALITY SNI %s\n' "$reality_target" "${reality_sni:-$reality_target}"
+            echo '请填写自己的站点域名，用于另外四个协议的 TLS 证书和 HTTPS 订阅。'
+        fi
+        read -r -p '自己的站点域名（0 返回）：' domain </dev/tty || return 1
+        [[ $domain != 0 ]] || return 0
+        [[ $domain =~ ^[a-z0-9][a-z0-9.-]*\.[a-z][a-z0-9-]*$ ]] || { echo '请输入有效的小写域名。'; return 1; }
+        if [[ $domain == "$reality_target" ]]; then
+            echo '站点域名和外部目标相同，请选择选项 1 使用本机 REALITY 目标。'
+            return 1
+        fi
     fi
     read -r -p 'VPS 公网 IPv4 或 IPv6（0 返回）：' ip </dev/tty || return 1
     [[ $ip != 0 ]] || return 0
@@ -210,9 +249,16 @@ quick_install() {
     duo validate-install "$domain" "$ip" "$ports" "$uuid" || return 1
     printf '已确认 UUID：%s%s%s\n' "$green" "$uuid" "$reset"
     heading '5/5  确认安装'
-    printf '域名 %s · 节点地址 %s\n' "$domain" "$ip"
-    if [[ -n $reality_target ]]; then
-        printf 'REALITY 目标 %s:443。HTTPS 订阅发布后使用自有域名的 TCP 8443。\n' "$reality_target"
+    if [[ $mode == 2 ]]; then
+        printf '无自有域名 · 节点地址 %s\nREALITY %s:443 · SNI %s\n' "$ip" "$reality_target" "$reality_target"
+        printf 'VMess WS Host %s\nHysteria 2 SNI %s\nTUIC SNI %s\nAnyTLS SNI %s\n' "${preset_values[@]}"
+        echo 'VMess WS 不启用 TLS。后三个协议使用公钥固定，请导入 sing-box JSON。'
+    else
+        printf '站点域名 %s · 节点地址 %s\n' "$domain" "$ip"
+        if [[ -n $reality_target ]]; then
+            printf 'REALITY %s:443 · SNI %s。HTTPS 订阅使用自有域名 TCP 8443。\n' \
+                "$reality_target" "${reality_sni:-$reality_target}"
+        fi
     fi
     for protocol in "${!protocol_labels[@]}"; do
         port=${protocol_ports[protocol]}
@@ -221,7 +267,7 @@ quick_install() {
     echo '安装后按输出放行各节点端口，再进行客户端验收。'
     read -r -p "${yellow}开始安装？[Y/n，回车确认] $reset" answer </dev/tty || return 1
     [[ ${answer:-y} == [yY] ]] || return 0
-    if ! certificate_ready "$domain"; then
+    if [[ $mode == 1 ]] && ! certificate_ready "$domain"; then
         resolved=$(timeout 5 getent ahosts "$domain" | awk '$2 == "STREAM" && !seen[$1]++ {print $1}') || resolved=''
         if [[ -z $resolved ]]; then
             printf '%s域名 %s 尚未解析到可用地址。请检查 A/AAAA 记录后重试。%s\n' "$red" "$domain" "$reset" >&2
@@ -230,22 +276,24 @@ quick_install() {
         printf '当前 DNS 解析结果（应指向这台 VPS）\n%s\n' "$resolved"
     fi
     if [[ -n $version ]]; then
-        duo packages --restart-managed --version "$version" || return 1
-    elif [[ ! -x /usr/bin/sing-box ]] || ! command -v caddy >/dev/null; then
-        duo packages || return 1
+        duo packages "${package_args[@]}" --restart-managed --version "$version" || return 1
+    elif [[ ! -x /usr/bin/sing-box ]] || { [[ $mode == 1 ]] && ! command -v caddy >/dev/null; }; then
+        duo packages "${package_args[@]}" || return 1
     fi
-    if ! certificate_ready "$domain"; then
+    if [[ $mode == 1 ]] && ! certificate_ready "$domain"; then
         started=$(date +%s)
         duo site "$domain" && wait_for_certificate "$domain" "$started" || return 1
-    else
+    elif [[  == 1 ]]; then
         echo 'Caddy 公信证书已就绪，继续安装。'
     fi
     local target_args=()
     if [[ -n $reality_target ]]; then target_args=(--reality-target "$reality_target"); fi
+    if [[ -n $reality_sni ]]; then target_args+=(--reality-sni "$reality_sni"); fi
+    if [[ $mode == 2 ]]; then target_args+=(--preset-names "$preset_names"); fi
     duo five "$domain" "$ip" --ports "$ports" --uuid "$uuid" "${target_args[@]}" || return 1
     printf '\n%s五协议安装成功 · 本机监听已确认%s\n' "$green" "$reset"
     echo '请在云防火墙放行上面列出的 TCP/UDP 端口。外网验收通过后，在主菜单 4 启用开机启动。'
-    option 1 '查看五条节点链接和二维码（含凭据）'
+    option 1 '查看节点链接和配置文件（含凭据）'
     option 2 '稍后在客户端与订阅菜单查看'
     choose 1
     if [[ $selection == 1 ]]; then duo five-share || return 1; fi
@@ -287,7 +335,7 @@ client_menu() {
     local default_option
     while true; do
         heading '客户端与订阅'
-        option 1 '查看五协议节点链接和二维码'
+        option 1 '查看节点链接和配置文件'
         option 2 '发布五协议单节点及聚合订阅'
         option 3 '查看五协议客户端验收步骤'
         option 4 '刷新节点地址（IPv4 / IPv6）'

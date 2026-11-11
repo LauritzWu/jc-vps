@@ -28,6 +28,10 @@ s=$(curl -4fsSL -m 25 "https://raw.githubusercontent.com/LauritzWu/jc-vps/$revis
 
 确认域名直指 VPS，公网 TCP 80 可用于 Caddy 签发和续期，随后选主菜单的「一键安装 sing-box」。每次安装选择一种节点地址。选择 IPv6 时，输入不带方括号的公网地址，并确认 VPS 和客户端都具备 IPv6 连通性。下载安装脚本和依赖仍需要 VPS 的 IPv4 出站。安装后按输出在云防火墙放行各协议对应的 TCP 或 UDP 端口。客户端验收通过后，在「服务管理」开启五协议自启动。命令行入口见 `bash duo.sh --help`。
 
+## 无自有域名模式（试用）
+
+安装向导第 2 步选「无自有域名」，分别选择 REALITY 握手目标、VMess WS Host，以及 Hysteria 2、TUIC 和 AnyTLS 的 SNI。所有节点连接 VPS 公网 IP。VMess WS 不启用 TLS，另外三个 TLS 节点使用 VPS 自签证书和客户端公钥固定。使用「客户端与订阅 → 查看节点链接和配置文件」查看 VLESS / VMess 链接，并通过 SSH 下载显示的五协议 sing-box JSON。HTTPS 订阅使用自有域名模式。
+
 ## 五协议节点与订阅
 
 - 协议为 REALITY、VMess WS + TLS、Hysteria 2、TUIC 和 AnyTLS。可随机选端口，也可指定五个端口。随机检查本机监听，云防火墙还需单独放行。UUID 可生成或指定，三种密码型协议各自生成密码。
