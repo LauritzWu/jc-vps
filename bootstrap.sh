@@ -24,7 +24,7 @@ for file in manager.sh client-template.json; do
     curl -4 -fsSL --retry 2 --connect-timeout 8 --max-time 25 "$source_url/$file" -o "$dir/$file"
 done
 (cd "$dir" && sha256sum -c <<'SHA256'
-2d108986b0856ffa7594711c5ed62e4bf18c195492c84d988abbf03ac62fd733  manager.sh
+f2c5ba9e6e1052a963620a3a0065e13a723907087d52c4e49744baefc130f4e9  manager.sh
 d96d8e1440c7b53ef47625820c77fe58c95a4ff0cef1f989d68c53ff099a7d7b  client-template.json
 SHA256
 )
@@ -332,7 +332,7 @@ core_menu() {
     done
 }
 
-install_shortcut() {
+install_lowercase_shortcut() {
     local target=/usr/local/bin/jc temp
     if [[ -e "$target" || -L "$target" ]]; then
         if [[ -f "$target" && ! -L "$target" && -x "$target" ]] &&
@@ -362,6 +362,20 @@ DUOSH
     printf 'jc 快捷命令已安装（%s）。\n' "$revision"
 }
 
+install_shortcut() {
+    local alias_path=/usr/local/bin/JC
+    install_lowercase_shortcut || return 1
+    if [[ -L $alias_path && $(readlink -- "$alias_path") == jc ]]; then
+        return 0
+    fi
+    if [[ -e $alias_path || -L $alias_path ]]; then
+        printf '发现其他程序使用 %s，保留原文件。可继续使用 jc。\n' "$alias_path" >&2
+        return 1
+    fi
+    ln -sT -- jc "$alias_path" || return 1
+    echo 'JC 快捷命令已安装。'
+}
+
 init_tools() {
     local missing=() pair package tool
     for pair in jq:jq qrencode:qrencode openssl:openssl iproute2:ss util-linux:flock; do
@@ -372,27 +386,36 @@ init_tools() {
         apt-get -o Acquire::ForceIPv4=true update &&
             apt-get -o Acquire::ForceIPv4=true install -y "${missing[@]}" || return 1
     fi
-    install_shortcut || printf '%s\n' '快捷命令未安装，仍可继续使用本次菜单。' >&2
+    install_shortcut || printf '%s\n' '快捷命令安装未全部完成，仍可继续使用本次菜单。' >&2
 }
 
 shortcut_menu() {
-    local target=/usr/local/bin/jc
+    local target=/usr/local/bin/jc alias_path=/usr/local/bin/JC answer
+    local shortcuts=()
     while true; do
         heading '管理 JC 快捷命令'
-        option 1 '安装 jc 快捷命令'
-        option 2 '卸载 jc 快捷命令（节点服务继续运行）'
+        option 1 '安装 jc / JC 快捷命令'
+        option 2 '卸载 jc / JC 快捷命令（节点服务继续运行）'
         choose 1
         case "$selection" in
             0) return ;;
             1) install_shortcut || true ;;
             2)
-                if [[ ! -f "$target" || -L "$target" ]] || ! grep -qxF -e '# Managed by JC' -e '# Managed by Lauritz Duo' "$target"; then
+                shortcuts=()
+                if [[ -L $alias_path && $(readlink -- "$alias_path") == jc ]]; then
+                    shortcuts+=("$alias_path")
+                fi
+                if [[ -f $target && ! -L $target ]] &&
+                    grep -qxF -e '# Managed by JC' -e '# Managed by Lauritz Duo' "$target"; then
+                    shortcuts+=("$target")
+                fi
+                if (( ! ${#shortcuts[@]} )); then
                     echo '未发现由 JC 安装的快捷命令。'
                     continue
                 fi
-                read -r -p '卸载 jc 快捷命令？[Y/N] ' answer </dev/tty || return
-                if [[ "$answer" == y || "$answer" == Y ]]; then
-                    rm -f -- "$target" && echo '快捷命令已卸载。'
+                read -r -p '卸载 jc / JC 快捷命令？[Y/N] ' answer </dev/tty || return
+                if [[ $answer == [yY] ]]; then
+                    rm -f -- "${shortcuts[@]}" && echo '快捷命令已卸载。'
                 fi ;;
             *) echo '无效选项。' ;;
         esac
@@ -516,7 +539,7 @@ tools_menu() {
     while true; do
         heading '系统工具'
         option 1 '查看或更新官方内核'
-        option 2 '安装或卸载 jc 快捷命令'
+        option 2 '安装或卸载 jc / JC 快捷命令'
         option 3 '手动覆盖服务器地区'
         option 4 '查看全部命令'
         option 5 '补齐快捷命令和基础组件'

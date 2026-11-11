@@ -18,7 +18,7 @@ s=$(curl -4fsSL -m 25 "https://raw.githubusercontent.com/LauritzWu/jc-vps/$revis
 
 首页包含服务状态、服务管理、客户端与订阅、网络与防火墙和系统工具。支持数字选择、回车默认和子菜单按 0 返回。底部显示系统、接口地址和服务状态。服务器地区通过 ipwho.is 按 VPS 公网出口 IP 查询并缓存 24 小时。在「系统工具 → 手动覆盖服务器地区」可手动设置，已保存的地区优先使用。
 
-首次运行自动安装 `jc` 快捷命令，并通过 APT 补齐缺失的 jq、qrencode、OpenSSL、iproute2 和 flock。以后输入 `jc` 即可打开菜单。已有 `duo` 的用户可运行一次 `duo`，新版会自动安装 `jc`。主菜单选「一键安装 sing-box」，按顺序选择内核、输入域名和公网节点地址（IPv4 或 IPv6）、分配端口、生成或填写 UUID，最后确认安装。
+首次运行自动安装 `jc` 快捷命令，并通过 APT 补齐缺失的 jq、qrencode、OpenSSL、iproute2 和 flock。在支持大小写快捷命令的版本中，输入 `jc` 或 `JC` 都可打开菜单。已有 `duo` 的用户可运行一次 `duo`，新版会自动安装 `jc`。主菜单选「一键安装 sing-box」，按顺序选择内核、输入域名和公网节点地址（IPv4 或 IPv6）、分配端口、生成或填写 UUID，最后确认安装。
 
 ## 卸载和重装
 

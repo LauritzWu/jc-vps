@@ -211,6 +211,9 @@ uninstall() {
     for region in "$config_home/jc" "$config_home/lauritz-duo"; do
         if [[ -d $region && ! -L $region ]]; then files+=("$region/region" "$region/region.auto"); fi
     done
+    if [[ -L /usr/local/bin/JC && $(readlink -- /usr/local/bin/JC) == jc ]]; then
+        files+=("/usr/local/bin/JC")
+    fi
     for shortcut in /usr/local/bin/jc /usr/local/bin/duo; do
         if [[ -f $shortcut && ! -L $shortcut ]] &&
            grep -qxF -e '# Managed by JC' -e '# Managed by Lauritz Duo' "$shortcut"; then
