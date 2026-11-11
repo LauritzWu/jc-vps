@@ -173,6 +173,15 @@ if (five_share --publish) >/dev/null 2>&1; then
     exit 1
 fi
 
+show_qr() { printf 'QR %s\n' "$1"; }
+output=$(five_share)
+[[ $(grep -c '^QR ' <<<"$output") == 5 ]]
+[[ $(grep -cE '^(vless|vmess|hysteria2|tuic|anytls)://' <<<"$output") == 5 ]]
+for label in "${kinds[@]}" all; do
+    grep -F "$dir/profiles/$label.json" <<<"$output" >/dev/null
+done
+grep -F "$dir/local-tls.crt" <<<"$output" >/dev/null
+
 for bad in '[2606:4700::1]' '2606::::1' 'fe80::1' '::1'; do
     if (valid_node_address "$bad") >/dev/null 2>&1; then
         printf 'Accepted invalid node address %s\n' "$bad" >&2

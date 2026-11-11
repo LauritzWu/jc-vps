@@ -900,10 +900,22 @@ five_share() {
     if [[ -z $domain ]]; then
         [[ ${1:-} != --publish ]] || fail '无自有域名模式请使用本地配置导出'
         refresh_five_aliases "$dir"
-        printf 'VLESS 和 VMess 分享链接（含凭据）\n'
-        while IFS= read -r link; do show_qr "$link"; done < <(head -n2 "$dir/links.txt")
-        printf '\n五协议 sing-box 配置：%s/all.json\n' "$dir"
-        echo '请通过 SSH 下载该文件并导入客户端。HY2、TUIC 和 AnyTLS 的公钥固定保存在 JSON 配置中。'
+        printf '五协议节点链接与二维码（含凭据）\n'
+        echo 'VLESS、VMess 可直接导入；HY2、TUIC、AnyTLS 扫码后须配置服务器证书，或直接导入下方 sing-box JSON。'
+        while IFS= read -r link; do
+            printf '\n[%s]\n' "${aliases[i]}"
+            show_qr "$link"
+            i=$((i+1))
+        done <"$dir/links.txt"
+        printf '\n全部节点链接（每行一个）\n'
+        while IFS= read -r link; do print_link "$link"; done <"$dir/links.txt"
+        printf '\n本地 sing-box 配置（通过 SSH 下载）\n'
+        for i in "${!kinds[@]}"; do
+            printf '  %-25s %s/%s.json\n' "${aliases[i]}" "$dir" "${kinds[i]}"
+        done
+        printf '  五协议聚合：%s/all.json\n' "$dir"
+        printf '  服务器证书：%s/local-tls.crt\n' "$(dirname -- "$dir")"
+        echo '本模式通过本地配置导入。HTTPS 单节点和聚合订阅请使用自有域名模式。'
         return
     fi
     valid_domain "$domain"

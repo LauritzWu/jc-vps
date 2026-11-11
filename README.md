@@ -30,7 +30,7 @@ s=$(curl -4fsSL -m 25 "https://raw.githubusercontent.com/LauritzWu/jc-vps/$revis
 
 ## 无自有域名模式（试用）
 
-安装向导第 2 步选「无自有域名」，分别选择 REALITY 握手目标、VMess WS Host，以及 Hysteria 2、TUIC 和 AnyTLS 的 SNI。所有节点连接 VPS 公网 IP。VMess WS 不启用 TLS，另外三个 TLS 节点使用 VPS 自签证书和客户端公钥固定。使用「客户端与订阅 → 查看节点链接和配置文件」查看 VLESS / VMess 链接，并通过 SSH 下载显示的五协议 sing-box JSON。HTTPS 订阅使用自有域名模式。
+安装向导第 2 步选「无自有域名」，分别选择 REALITY 握手目标、VMess WS Host，以及 Hysteria 2、TUIC 和 AnyTLS 的 SNI。所有节点连接 VPS 公网 IP。VMess WS 不启用 TLS，另外三个 TLS 节点使用 VPS 自签证书和客户端公钥固定。使用「客户端与订阅 → 查看节点链接和配置文件」查看五条链接和二维码。VLESS 和 VMess 可直接导入。HY2、TUIC 和 AnyTLS 需要在客户端设置信任服务器证书，或通过 SSH 下载菜单列出的单节点或聚合 sing-box JSON（已包含公钥固定）。HTTPS 订阅使用自有域名模式。
 
 ## 五协议节点与订阅
 

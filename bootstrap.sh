@@ -24,7 +24,7 @@ for file in manager.sh client-template.json; do
     curl -4 -fsSL --retry 2 --connect-timeout 8 --max-time 25 "$source_url/$file" -o "$dir/$file"
 done
 (cd "$dir" && sha256sum -c <<'SHA256'
-3a0f85c7089ae83092b0178f5f64a8b6f6274a1db7fd5dd2dd77d1f42c150472  manager.sh
+92922e9e4f7324cc48c926d66bf10c06ab7e42bf9cfc65a8faa096dcaefeb876  manager.sh
 d96d8e1440c7b53ef47625820c77fe58c95a4ff0cef1f989d68c53ff099a7d7b  client-template.json
 SHA256
 )
