@@ -7,8 +7,6 @@ core=/usr/bin/sing-box
 caddyfile=/etc/caddy/Caddyfile
 units=/etc/systemd/system
 profiles=/var/lib/caddy/private-profiles
-real=sing-box-reality
-hy2=sing-box-hy2
 five=sing-box-jc-five
 # Continue managing units installed before the JC rename.
 legacy_five=sing-box-lauritz-five
@@ -143,7 +141,7 @@ upgrade_managed() {
         fail '检测到独立的 sing-box 服务，请先安排其升级'
     fi
     "${apt[@]}" -s install "$@" >/dev/null || fail '无法安装目标版本，当前版本仍在运行'
-    for service in "$real" "$hy2" "$five" "$legacy_five"; do
+    for service in sing-box-reality sing-box-hy2 "$five" "$legacy_five"; do
         [[ " ${upgrade_running[*]} " != *" $service "* ]] || continue
         if systemctl is-active --quiet "$service"; then
             check "$(cfg "$service")" || fail "$service 当前配置无法通过校验"
@@ -176,7 +174,13 @@ uninstall() {
     local shortcut region config_home="${XDG_CONFIG_HOME:-$HOME/.config}"
     local managed=() owned_pids=() files=() dirs=()
     package=$(dpkg-query -W -f='${Status}' sing-box 2>/dev/null) || package=''
-    for service in sing-box-hy2-hopping "$five" "$hy2" "$real"; do
+    # Older installations may still share the official sing-box binary.
+    for service in sing-box-reality sing-box-hy2; do
+        state=$(systemctl show -p LoadState --value "$service.service") || [[ $state == not-found ]] ||
+            fail "无法确认 $service.service 的状态"
+        [[ $state == not-found ]] || fail "检测到旧双协议服务 $service.service，请先迁移并移除旧服务"
+    done
+    for service in "$five"; do
         state=$(systemctl show -p LoadState --value "$service.service")
         case "$state" in
             not-found) continue ;;
@@ -197,11 +201,8 @@ uninstall() {
         [[ " ${owned_pids[*]} " == *" $pid "* ]] || fail "检测到其他 sing-box 进程（PID $pid），请先检查"
     done
     if [[ $package == 'install ok installed' ]]; then dpkg --no-act --remove sing-box; fi
-    dirs+=("/etc/$real" "/etc/$hy2" "/etc/$five")
-    if [[ ! -L $units/$real.service.d ]]; then files+=("$units/$real.service.d/10-official-binary.conf"); fi
-    if [[ ! -L $units/$hy2.service.d ]]; then files+=("$units/$hy2.service.d/10-caddy-cert-read.conf"); fi
+    dirs+=("/etc/$five")
     if [[ -d $profiles && ! -L $profiles ]]; then
-        files+=("$profiles/lax.json")
         if [[ -d $profiles/five && ! -L $profiles/five ]]; then
             for kind in "${kinds[@]}" all; do
                 for ext in json sub; do files+=("$profiles/five/$kind.$ext"); done
@@ -319,7 +320,6 @@ socket_ready() {
 check() { "$core" check -c "$1"; }
 
 created=() started=()
-rollback_config='' rollback_backup='' rollback_service=''
 upgrade_backup='' upgrade_running=()
 port_backup='' port_paths=()
 cleanup() {
@@ -345,14 +345,6 @@ cleanup() {
             else
                 printf '自动恢复失败，原版本安装包保留在 %s\n' "$upgrade_backup" >&2
                 return "$code"
-            fi
-        fi
-        if [[ -n $rollback_config ]]; then
-            if private_put "$rollback_config" <"$rollback_backup"; then
-                systemctl restart "$rollback_service" || true
-            else
-                created=()
-                printf '恢复配置失败，原配置位于 %s\n' "$rollback_backup" >&2
             fi
         fi
         for name in "${started[@]}"; do systemctl stop "$name" || true; done
@@ -381,185 +373,10 @@ server_doc() {
     jq '{inbounds:.,outbounds:[{type:"direct",tag:"direct"}],
          route:{rules:[{ip_is_private:true,action:"reject"}],final:"direct"}}'
 }
-deploy() {
-    local domain=$1 listen=0.0.0.0 cert private public user short password rows
-    if [[ ${2:-} == --ipv6 ]]; then listen=::; fi
-    preflight "$domain"
-    ensure_unused "$real"
-    ensure_unused "$hy2"
-    rows=$(ss -H -lntup '( sport = :443 )')
-    [[ -z $rows ]] || fail '443 已被占用'
-    reality_keys
-    user=$(cat /proc/sys/kernel/random/uuid)
-    short=$(openssl rand -hex 4)
-    password=$(openssl rand -hex 24)
-    DUO_UUID=$user DUO_KEY=$private DUO_SID=$short \
-    jq -n --arg listen "$listen" --arg domain "$domain" \
-        '[{type:"vless",listen:$listen,listen_port:443,users:[{uuid:$ENV.DUO_UUID,flow:"xtls-rprx-vision"}],
-        tls:{enabled:true,server_name:$domain,reality:{enabled:true,private_key:$ENV.DUO_KEY,short_id:[$ENV.DUO_SID],
-        handshake:{server:"127.0.0.1",server_port:8443}}}}]' | server_doc >"$scratch/real.json"
-    DUO_PASS=$password jq -n --arg listen "$listen" --arg cert "$cert" --arg key "${cert%.crt}.key" \
-        '[{type:"hysteria2",listen:$listen,listen_port:443,users:[{name:"lax",password:$ENV.DUO_PASS}],
-        tls:{enabled:true,certificate_path:$cert,key_path:$key}}]' | server_doc >"$scratch/hy2.json"
-    check "$scratch/real.json"
-    check "$scratch/hy2.json"
-    new_service "$real"
-    new_service "$hy2"
-    private_put "$(cfg "$real")" <"$scratch/real.json"
-    private_put "$(cfg "$hy2")" <"$scratch/hy2.json"
-    printf 'UUID=%s\nPublic key=%s\nShort ID=%s\n' "$user" "$public" "$short" |
-        private_put "/etc/$real/client.txt"
-    printf 'hysteria2://%s@%s:443/?sni=%s&insecure=0#JC-HY2\n' "$password" "$domain" "$domain" |
-        private_put "/etc/$hy2/client-uri.txt"
-    unit_file "$real" ''
-    unit_file "$hy2" ' CAP_DAC_READ_SEARCH'
-    systemctl daemon-reload
-    started+=("$real" "$hy2")
-    systemctl start "$real" "$hy2"
-    socket_ready "$real" 443/tcp && socket_ready "$hy2" 443/udp || fail '未确认主备监听'
-    printf '两条线路已在本机监听。外网实测通过后启用开机启动。\n'
-}
-
-rules() {
-    local service=$1 port path new backup
-    case "$service" in "$real") port=443/tcp;; "$hy2") port=443/udp;; *) fail '未知服务';; esac
-    socket_ready "$service" "$port" || fail '服务未监听'
-    path=$(cfg "$service")
-    jq -e '
-      def expected: [{rule_set:"cn-domains",action:"reject"},{action:"resolve",server:"vps-dns"},
-        {ip_is_private:true,action:"reject"},{rule_set:"cn-addresses",action:"reject"}];
-      (.route.rules == expected or .route.rules == [{ip_is_private:true,action:"reject"}]) and
-      ((.dns // {servers:[{type:"local",tag:"vps-dns"}]}) == {servers:[{type:"local",tag:"vps-dns"}]}) and
-      all(.route.rule_set[]?; .tag == "cn-domains" or .tag == "cn-addresses")
-    ' "$path" >/dev/null || fail '检测到自定义规则，已停止'
-    new=$(mktemp -d "$(dirname "$path")/cn-rules.XXXXXX")
-    created+=("$new")
-    fetch https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-geolocation-cn.srs -o "$new/cn-domains.srs"
-    fetch https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-cn.srs -o "$new/cn-addresses.srs"
-    jq --arg dir "$new" '
-      .dns = {servers:[{type:"local",tag:"vps-dns"}]} |
-      .route.rules = [{rule_set:"cn-domains",action:"reject"},{action:"resolve",server:"vps-dns"},
-        {ip_is_private:true,action:"reject"},{rule_set:"cn-addresses",action:"reject"}] |
-      .route.rule_set = (["cn-domains","cn-addresses"] | map({type:"local",tag:.,format:"binary",path:($dir+"/"+.+".srs")}))
-    ' "$path" >"$scratch/config.json"
-    check "$scratch/config.json"
-    backup="$(dirname "$path")/config.before-cn.$(date +%s%N).json"
-    private_put "$backup" <"$path"
-    rollback_config=$path
-    rollback_backup=$backup
-    rollback_service=$service
-    private_put "$path" <"$scratch/config.json"
-    systemctl restart "$service" && socket_ready "$service" "$port" || fail '监听验证失败，正在恢复原配置'
-    rollback_config=''
-    printf '%s 已恢复监听。原配置备份 %s\n' "$service" "$backup"
-}
 port_number() { [[ $1 =~ ^[1-9][0-9]{0,4}$ ]] && (( $1 <= 65535 )); }
-hop_range() {
-    port_number "$1" && port_number "$2" && (( $1>=1024 && $2>$1 && $2-$1<100 )) ||
-        fail '跳跃范围应为 1024–65535 内连续的 2 至 100 个端口'
-}
-hopping() {
-    local first=$1 last=$2 nft unit=sing-box-hy2-hopping path="/etc/$hy2/hopping.nft" rows
-    hop_range "$first" "$last"
-    socket_ready "$hy2" 443/udp || fail 'HY2 未监听'
-    nft=$(command -v nft) || fail '请通过 APT 安装 nftables'
-    [[ ! -e $path && ! -e $units/$unit.service ]] || fail '跳跃服务或配置已存在'
-    if "$nft" list table inet yg_plus_hy2 >/dev/null 2>&1; then fail '同名 nftables 表已存在'; fi
-    rows=$(ss -H -lnu "( sport >= :$first and sport <= :$last )")
-    [[ -z $rows ]] || fail '范围内存在 UDP 监听'
-    cat >"$scratch/hopping.nft" <<NFT
-table inet yg_plus_hy2 {
-    chain prerouting {
-        type nat hook prerouting priority dstnat; policy accept;
-        udp dport $first-$last counter redirect to :443
-    }
-}
-NFT
-    "$nft" -c -f "$scratch/hopping.nft"
-    private_put "$path" <"$scratch/hopping.nft"
-    created+=("$path")
-    put "$units/$unit.service" 644 root <<UNIT
-[Unit]
-Description=JC Hysteria 2 port hopping
-After=sing-box-hy2.service nftables.service
-
-[Service]
-Type=oneshot
-RemainAfterExit=yes
-ExecStart=$nft -f $path
-ExecStop=$nft delete table inet yg_plus_hy2
-
-[Install]
-WantedBy=multi-user.target
-UNIT
-    created+=("$units/$unit.service")
-    systemctl daemon-reload
-    started+=("$unit")
-    systemctl start "$unit"
-    printf 'UDP %s-%s 已转发至 UDP 443。外网实测通过后运行 systemctl enable %s。\n' "$first" "$last" "$unit"
-    printf '发布订阅时可指定 --hop-range %s:%s\n' "$first" "$last"
-}
-real_metadata() {
-    domain=$(jq -er '.inbounds[0].tls.server_name' "$(cfg "$real")")
-    valid_domain "$domain"
-    public=$(sed -n 's/^Public key=//p' "/etc/$real/client.txt")
-    [[ $public =~ ^[A-Za-z0-9_-]{43}$ ]] || fail 'REALITY 公钥格式异常'
-}
 reality_uri() {
     printf 'vless://%s@%s:%s?encryption=none&security=reality&sni=%s&fp=chrome&pbk=%s&sid=%s&type=tcp&flow=xtls-rprx-vision#%s\n' \
         "$1" "$2" "$3" "${6:-$domain}" "$public" "$4" "$5"
-}
-dual_links() {
-    local domain public user short password rport hport
-    real_metadata
-    user=$(jq -er '.inbounds[0].users[0].uuid' "$(cfg "$real")")
-    short=$(jq -er '.inbounds[0].tls.reality.short_id[0]' "$(cfg "$real")")
-    rport=$(jq -er '.inbounds[0].listen_port' "$(cfg "$real")")
-    hport=$(jq -er '.inbounds[0].listen_port' "$(cfg "$hy2")")
-    password=$(jq -er '.inbounds[0].users[0].password|@uri' "$(cfg "$hy2")")
-    reality_uri "$user" "$domain" "$rport" "$short" JC-VLESS
-    printf 'hysteria2://%s@%s:%s/?sni=%s&insecure=0#JC-HY2\n' "$password" "$domain" "$hport" "$domain"
-}
-sync_profile() {
-    local host=$1 range=$2 first last table
-    valid_ip "$host"
-    real_metadata
-    if [[ -n $range ]]; then
-        [[ $range == *:* ]] || fail '格式为 START:END'
-        first=${range%:*}; last=${range#*:}
-        hop_range "$first" "$last"
-        table=$(nft list table inet yg_plus_hy2)
-        [[ $table == *"udp dport $first-$last "* && $table == *'redirect to :443'* ]] ||
-            fail '实际跳跃规则与指定范围不符'
-    fi
-    jq --arg host "$host" --arg domain "$domain" --arg public "$public" --arg hop "$range" \
-        --slurpfile real "$(cfg "$real")" --slurpfile hy2 "$(cfg "$hy2")" '
-        "JC-VLESS" as $main | "JC-HY2" as $backup |
-        .outbounds as $all |
-        ([$all[] | select(.tag=="PROXY" and .type=="selector")]) as $groups |
-        if ($groups|length)!=1 then error("需要唯一 PROXY selector") else . end |
-        $groups[0] as $group |
-        if any($group.outbounds[]; . as $tag |
-          ([ $all[] | select(.tag==$tag and (.type|IN("selector","urltest","direct","block")|not)) ]|length)!=1)
-          then error("PROXY 引用无效") else . end |
-        ($group.outbounds - [$main,$backup]) as $removed |
-        $real[0].inbounds[0] as $r | $hy2[0].inbounds[0] as $h |
-        {enabled:true,server_name:$domain} as $tls |
-        .outbounds = [
-          ($group | .outbounds=[$main,$backup] | .default=$main),
-          {type:"vless",tag:$main,server:$host,server_port:$r.listen_port,
-           uuid:$r.users[0].uuid,flow:"xtls-rprx-vision",
-           tls:($tls+{utls:{enabled:true,fingerprint:"chrome"},
-             reality:{enabled:true,public_key:$public,short_id:$r.tls.reality.short_id[0]}})},
-          ({type:"hysteria2",tag:$backup,server:$host,server_port:$h.listen_port,
-            password:$h.users[0].password,tls:($tls+{insecure:false})} |
-            if $hop=="" then . else del(.server_port)+{server_ports:[$hop],hop_interval:"30s"} end),
-          ($all[] | select(.tag as $tag | ($removed+["PROXY",$main,$backup]|index($tag))==null))
-        ] |
-        if any(..|strings; . as $value | ($removed|index($value))!=null)
-          then error("模板仍引用旧节点") else . end
-    ' "$template" >"$scratch/profile.json"
-    check "$scratch/profile.json"
 }
 auth_block() {
     local pass repeat version major minor LC_ALL=C
@@ -587,45 +404,6 @@ profile_dir() {
 site_block() {
     awk -v marker="$1:8443 {" '$0 == marker {inside=1} inside {print} inside && /^}/ {exit}' "$caddyfile"
 }
-publish_dual() {
-    local domain=$1 hash auth block
-    block=$(site_block "$domain")
-    if [[ $block != *'/profiles/lax.json'* ]]; then
-        [[ $(grep -Ec '^[[:blank:]]*respond "LAX server is online\."[[:blank:]]*$' <<<"$block") == 1 ]] ||
-            fail 'Caddyfile 与预期不同'
-        auth_block
-        cat >"$scratch/block" <<CADDY
-    handle /profiles/lax.json {
-        $auth {
-            lax $hash
-        }
-        header Cache-Control "no-store"
-        root * $profiles
-        rewrite * /lax.json
-        file_server
-    }
-    handle {
-        respond "LAX server is online."
-    }
-CADDY
-        awk -v marker="$domain:8443 {" -v block="$scratch/block" '
-          $0 == marker {inside=1} /^}/ {inside=0}
-          inside && /^[[:blank:]]*respond "LAX server is online\."[[:blank:]]*$/ {
-            while ((getline line < block) > 0) print line; next
-        } {print}' "$caddyfile" >"$scratch/Caddyfile"
-        reload_site "$scratch/Caddyfile"
-    fi
-    auth_required "$domain" /profiles/lax.json
-    profile_dir "$profiles"
-    if [[ -f $profiles/lax.json ]]; then
-        private_put "/root/lax-profile-before.$(date +%s%N).json" <"$profiles/lax.json"
-    fi
-    put "$profiles/lax.json" 640 caddy <"$scratch/profile.json"
-    printf '%s订阅已发布%s\n' "$green" "$reset"
-    print_link "https://$domain/profiles/lax.json"
-    printf '用户名 lax，请在客户端验证认证后可下载。\n'
-}
-
 parse_five_ports() {
     local value=$1 port
     ports=(auto auto auto auto auto)
@@ -1027,13 +805,7 @@ JC
   packages [--restart-managed] [--version VERSION]
   uninstall
   site DOMAIN
-  deploy DOMAIN [--ipv6]
   status [DOMAIN]
-  links
-  export IPV4 OUTPUT [--template FILE] [--hop-range START:END]
-  publish IPV4 [--template FILE] [--hop-range START:END]
-  rules SERVICE
-  hopping FIRST LAST
   five DOMAIN IP [--ports P1,P2,P3,P4,P5] [--uuid UUID] [--reality-target DOMAIN] [--template FILE]
   five-share [--publish]
   five-port PROTOCOL PORT
@@ -1064,49 +836,32 @@ case "$command_name" in
     packages) packages "$@";;
     uninstall) [[ $# == 0 ]] || fail '用法 uninstall'; uninstall;;
     site) [[ $# == 1 ]] || fail '用法 site DOMAIN'; site "$1";;
-    deploy)
-        [[ $# == 1 || ( $# == 2 && $2 == --ipv6 ) ]] || fail '用法 deploy DOMAIN [--ipv6]'
-        deploy "$@";;
     status)
         [[ $# -le 1 ]] || fail '用法 status [DOMAIN]'
-        systemctl --no-pager show "$real" "$hy2" "$five" caddy -p Id -p ActiveState -p UnitFileState -p ExecStart || true
-        ss -lntup '( sport = :22 or sport = :80 or sport = :443 or sport = :8443 )'
+        systemctl --no-pager show "$five" caddy -p Id -p ActiveState -p UnitFileState -p ExecStart || true
+        pid=$(systemctl show -p MainPID --value "$five" 2>/dev/null) || pid=0
+        ss -lntup | awk -v pid="$pid" 'NR == 1 || (pid > 0 && $0 ~ ("pid=" pid ","))'
         ip -6 addr show scope global
         if (( $# )); then valid_domain "$1"; getent ahosts "$1"; site_curl "$1" / -fsS; printf '\n'; fi;;
-    links) [[ $# == 0 ]] || fail '用法 links'; dual_links;;
-    rules) [[ $# == 1 ]] || fail '用法 rules SERVICE'; rules "$1";;
-    hopping) [[ $# == 2 ]] || fail '用法 hopping FIRST LAST'; hopping "$@";;
     five-share)
         [[ $# == 0 || ( $# == 1 && $1 == --publish ) ]] || fail '用法 five-share [--publish]'
         five_share "$@";;
     five-port) [[ $# == 2 ]] || fail '用法 five-port PROTOCOL PORT'; change_five_port "$@";;
-    five|publish|export)
-        host=${1:-}; arg=${2:-}; port_text=''; uuid_text=''; range=''; reality_target=''
-        case "$command_name" in
-            five|export) [[ $# -ge 2 ]] || fail '缺少位置参数'; shift 2;;
-            publish) [[ $# -ge 1 ]] || fail '缺少 VPS IPv4'; shift;;
-        esac
+    five)
+        [[ $# -ge 2 ]] || fail '缺少域名或公网节点地址'
+        host=$1; arg=$2; port_text=''; uuid_text=''; reality_target=''
+        shift 2
         while (( $# )); do
             [[ $# -ge 2 ]] || fail "缺少 $1 的值"
-            case "$command_name:$1" in
-                *:--template) template=$2;;
-                five:--ports) port_text=$2;;
-                five:--uuid) uuid_text=$2;;
-                five:--reality-target) reality_target=$2;;
-                export:--hop-range|publish:--hop-range) range=$2;;
+            case "$1" in
+                --template) template=$2;;
+                --ports) port_text=$2;;
+                --uuid) uuid_text=$2;;
+                --reality-target) reality_target=$2;;
                 *) fail "未知参数 $1";;
             esac
             shift 2
         done
-        if [[ $command_name == five ]]; then five_deploy "$host" "$arg" "$port_text" "$uuid_text" "$reality_target"
-        else
-            domain='' public=''
-            sync_profile "$host" "$range"
-            if [[ $command_name == publish ]]; then publish_dual "$domain"
-            else
-                (set -o noclobber; cat "$scratch/profile.json" >"$arg") || fail '无法写入，请使用新的文件名'
-                printf '本地客户端配置已写入 %s。文件含节点凭据。\n' "$arg"
-            fi
-        fi;;
+        five_deploy "$host" "$arg" "$port_text" "$uuid_text" "$reality_target";;
     *) fail "未知命令 $command_name";;
 esac

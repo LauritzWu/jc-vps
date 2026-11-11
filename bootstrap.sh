@@ -17,14 +17,14 @@ for dependency in curl; do
 done
 
 printf '正在下载 JC 程序与模板（%s）…\n' "$revision"
-source_url="https://raw.githubusercontent.com/LauritzWu/lauritz-duo/$revision"
+source_url="https://raw.githubusercontent.com/LauritzWu/jc-vps/$revision"
 dir=$(mktemp -d)
 trap 'rm -f "$dir/manager.sh" "$dir/client-template.json"; rmdir "$dir"' EXIT
 for file in manager.sh client-template.json; do
     curl -4 -fsSL --retry 2 --connect-timeout 8 --max-time 25 "$source_url/$file" -o "$dir/$file"
 done
 (cd "$dir" && sha256sum -c <<'SHA256'
-f0adb7c6ba87b7c313a24d9e2d1565ec2bf18258370bfd6a5de3d995d459d57d  manager.sh
+a8bf2e43224937cd269468c84aaebb10e0af1bd6b84742f7d73ff0ef8e52439b  manager.sh
 d96d8e1440c7b53ef47625820c77fe58c95a4ff0cef1f989d68c53ff099a7d7b  client-template.json
 SHA256
 )
@@ -90,8 +90,7 @@ quick_install() {
 
     heading '一键安装 sing-box · 五协议'
     printf '%s\n' 'REALITY / VMess WS + TLS / Hysteria 2 / TUIC / AnyTLS' \
-        '请将域名直接解析到 VPS，并在云防火墙放行 TCP 80 供 Caddy 签发或续期。' \
-        '已有主备服务可继续运行。新五协议使用另外分配的端口。'
+        '请将域名直接解析到 VPS，并在云防火墙放行 TCP 80 供 Caddy 签发或续期。'
     heading '1/5  官方内核'
     option 1 '使用已安装的官方内核；新机安装 APT 稳定版'
         option 2 '指定官方 APT 版本（运行中的 JC 服务会短暂重启）'
@@ -244,14 +243,12 @@ choose() {
 }
 
 client_menu() {
-    local ip default_option
+    local default_option
     while true; do
         heading '客户端与订阅'
         option 1 '查看五协议节点链接和二维码'
         option 2 '发布五协议单节点及聚合订阅'
         option 3 '查看五协议客户端验收步骤'
-        option 4 '旧双协议：导出 sing-box JSON（固定 IPv4）'
-        option 5 '旧双协议：发布或更新 HTTPS 订阅'
         default_option=3
         if [[ -s /etc/$five_service/profiles/links.txt ]]; then default_option=1; fi
         choose "$default_option"
@@ -262,14 +259,6 @@ client_menu() {
             3) printf '%s\n' '导入五协议节点链接，或将 sing-box JSON 导入客户端。' \
                    '逐条切换为活动节点并打开网页，确认连接和出口地址。' \
                    '实测通过后，可在「服务管理」启用五协议开机启动。' ;;
-            4|5)
-                read -r -p '请输入 VPS 公网 IPv4（0 返回）：' ip </dev/tty || return
-                [[ "$ip" == 0 ]] && continue
-                if [[ "$selection" == 4 ]]; then
-                    duo export "$ip" "$HOME/jc-client-$(date +%s).json" || true
-                else
-                    duo publish "$ip" || true
-                fi ;;
             *) echo '无效选项。' ;;
         esac
     done
@@ -343,28 +332,6 @@ core_menu() {
     done
 }
 
-custom_menu() {
-    while true; do
-        heading '自定义规则与备用端口'
-        option 1 '为 Hysteria 2 更新国内目的地拒绝规则'
-        option 2 '为 REALITY 更新国内目的地拒绝规则'
-        option 3 '设置 Hysteria 2 UDP 跳跃范围'
-        choose 1
-        case "$selection" in
-            0) return ;;
-            1|2)
-                service=sing-box-hy2
-                [[ "$selection" == 2 ]] && service=sing-box-reality
-                read -r -p "短暂重启 $service，请确认 SSH 走另一条线路 [Y/N]：" answer </dev/tty || return
-                if [[ "$answer" == y || "$answer" == Y ]]; then duo rules "$service" || true; fi ;;
-            3)
-                read -r -p '输入 UDP 起止端口，用空格分隔（0 返回）：' first last </dev/tty || return
-                [[ "$first" == 0 ]] || duo hopping "$first" "$last" || true ;;
-            *) echo '无效选项。' ;;
-        esac
-    done
-}
-
 install_shortcut() {
     local target=/usr/local/bin/jc temp
     if [[ -e "$target" || -L "$target" ]]; then
@@ -385,7 +352,7 @@ install_shortcut() {
         cat <<'DUOSH'
 f=$(mktemp)
 trap 'rm -f "$f"' EXIT
-curl -4 -fsSL --connect-timeout 8 --max-time 25 "https://raw.githubusercontent.com/LauritzWu/lauritz-duo/$revision/bootstrap.sh" -o "$f"
+curl -4 -fsSL --connect-timeout 8 --max-time 25 "https://raw.githubusercontent.com/LauritzWu/jc-vps/$revision/bootstrap.sh" -o "$f"
 bash "$f" "$revision"
 DUOSH
     } > "$temp" || ! chmod 0755 "$temp" || ! mv -fT -- "$temp" "$target"; then
@@ -478,7 +445,7 @@ detect_region() {
 }
 
 vps_summary() {
-    local os ipv4 ipv6 region kernel active unit state names
+    local os ipv4 ipv6 region kernel state
     os=$(awk -F= '$1=="PRETTY_NAME" {print substr($0,index($0,"=")+1); exit}' /etc/os-release 2>/dev/null || true)
     os=${os#\"}; os=${os%\"}
     ipv4=$(ip -o -4 addr show scope global 2>/dev/null | awk '{sub(/\/.*/,"",$4); printf "%s%s", sep,$4; sep="  "}' || true)
@@ -493,20 +460,17 @@ vps_summary() {
         kernel=$(/usr/bin/sing-box version 2>/dev/null | sed -n '1p' || true)
         kernel=${kernel#sing-box version }
     fi
-    names=(REALITY HY2 五协议)
-    active=''
-    local idx=0
-    for unit in sing-box-reality sing-box-hy2 "$five_service"; do
+    state='未安装'
+    if systemctl is-active --quiet "$five_service" 2>/dev/null; then
+        state='运行中'
+    elif [[ -s /etc/$five_service/config.json ]]; then
         state='未运行'
-        if systemctl is-active --quiet "$unit" 2>/dev/null; then state='运行中'; fi
-        active+="${names[idx]} $state  "
-        idx=$((idx+1))
-    done
+    fi
     heading 'VPS 概况'
     printf ' 主机  %s    系统  %s\n' "$(hostname)" "${os:-未知}"
     printf ' Linux %s    架构  %s    sing-box  %s\n' "$(uname -r)" "$(uname -m)" "${kernel:-未检测到}"
     printf ' IPv4  %s\n IPv6  %s\n' "${ipv4:-未检测到}" "${ipv6:-未检测到}"
-    printf ' 地区  %s\n 服务  %s\n' "${region:-未能识别（系统工具可手动覆盖）}" "$active"
+    printf ' 地区  %s\n 服务  五协议 %s\n' "${region:-未能识别（系统工具可手动覆盖）}" "$state"
 }
 
 service_menu() {
@@ -516,15 +480,12 @@ service_menu() {
         heading '服务管理'
         option 1 '启动或恢复五协议服务'
         option 2 '五协议设为开机启动（客户端验收后）'
-        option 3 '启动已有 REALITY / HY2 主备'
-        option 4 '已有主备设为开机启动（客户端验收后）'
-        option 5 '更换单个五协议节点的端口'
+        option 3 '更换单个五协议节点的端口'
         choose 1
         case "$selection" in
             0) return ;;
             1) systemctl start "$five_service" && echo '五协议服务已启动。' ;;
-            3) systemctl start sing-box-reality sing-box-hy2 && echo '现有主备已启动。' ;;
-            5)
+            3)
                 heading '选择要换端口的协议'
                 option 1 'REALITY (TCP)'
                 option 2 'VMess WS (TCP)'
@@ -539,33 +500,13 @@ service_menu() {
                 printf '请先在云防火墙放行新端口。应用时五协议服务会短暂重启。\n'
                 read -r -p '确认切换端口？[y/N] ' answer </dev/tty || return
                 if [[ $answer == [yY] ]]; then duo five-port "$kind" "$port" || true; fi ;;
-            2|4)
-                local services=("$five_service")
-                if [[ $selection == 4 ]]; then services=(sing-box-reality sing-box-hy2); fi
+            2)
                 read -r -p '客户端验收已经通过？[Y/N] ' answer </dev/tty || return
-                if [[ $answer == y || $answer == Y ]]; then
-                    local service ready=1
-                    for service in "${services[@]}"; do
-                        systemctl is-active --quiet "$service" || ready=0
-                    done
-                    if (( ready )); then systemctl enable "${services[@]}" || true
+                if [[ $answer == [yY] ]]; then
+                    if systemctl is-active --quiet "$five_service"; then
+                        systemctl enable "$five_service" || true
                     else echo '请先启动服务并完成外网验收。'; fi
                 fi ;;
-            *) echo '无效选项。' ;;
-        esac
-    done
-}
-
-network_menu() {
-    while true; do
-        heading '网络与防火墙'
-        option 1 '监听端口与防火墙'
-        option 2 '国内规则与 UDP 跳跃'
-        choose 1
-        case "$selection" in
-            0) return ;;
-            1) firewall_menu ;;
-            2) custom_menu ;;
             *) echo '无效选项。' ;;
         esac
     done
@@ -660,8 +601,7 @@ while true; do
     option 0 '退出'
     home_rule "$width"
     vps_summary
-    if [[ ! -s /etc/$five_service/config.json &&
-        ! -s /etc/sing-box-reality/config.json && ! -s /etc/sing-box-hy2/config.json ]]; then
+    if [[ ! -s /etc/$five_service/config.json ]]; then
         printf '%s尚未部署 JC 节点，请先选择 1 安装。%s\n' "$yellow" "$reset"
     fi
     home_rule "$width"
@@ -679,7 +619,7 @@ while true; do
         3) duo status || true ;;
         4) service_menu ;;
         5) client_menu ;;
-        6) network_menu ;;
+        6) firewall_menu ;;
         7) tools_menu ;;
         0) exit 0 ;;
         *) printf '%s\n' '无效选项。' >&2 ;;
