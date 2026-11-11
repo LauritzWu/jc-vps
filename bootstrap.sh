@@ -807,11 +807,9 @@ while true; do
     width=$(home_width)
     home_banner "$width"
     heading '管理菜单'
-    default_option=1
-    default_label='1 安装'
+    deployed=false
     if five_deployed; then
-        default_option=3
-        default_label='3 服务状态'
+        deployed=true
         option 1 '一键安装 sing-box（五协议已部署）' "$green"
     else
         option 1 '一键安装 sing-box' "$green"
@@ -828,12 +826,20 @@ while true; do
     if [[ -s /etc/$five_service/config.json ]]; then
         heading '五协议节点 · 配置端口'
         duo five-summary || true
-    elif ! five_deployed; then
+    elif ! $deployed; then
         printf '%s尚未部署 JC 节点，按 1 或回车安装。%s\n' "$yellow" "$reset"
     fi
     home_rule "$width"
-    read -r -p "${yellow}请选择 [回车默认 $default_label，0 退出]：$reset" selection </dev/tty || exit 1
-    case "${selection:-$default_option}" in
+    if $deployed; then
+        while true; do
+            read -r -p "${yellow}请输入序号 [0–7]：$reset" selection </dev/tty || exit 1
+            [[ -n $selection ]] && break
+        done
+    else
+        read -r -p "${yellow}请选择 [回车默认 1 安装，0 退出]：$reset" selection </dev/tty || exit 1
+        selection=${selection:-1}
+    fi
+    case "$selection" in
         1)
             quick_install || echo '安装未完成，请查看上面的报错。'
             pause_menu ;;
