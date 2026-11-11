@@ -17,14 +17,14 @@ for dependency in curl; do
 done
 
 printf '正在下载 JC 程序与模板（%s）…\n' "$revision"
-source_url="https://raw.githubusercontent.com/LauritzWu/lauritz-duo/$revision"
+source_url="https://raw.githubusercontent.com/LauritzWu/jc-vps/$revision"
 dir=$(mktemp -d)
 trap 'rm -f "$dir/manager.sh" "$dir/client-template.json"; rmdir "$dir"' EXIT
 for file in manager.sh client-template.json; do
     curl -4 -fsSL --retry 2 --connect-timeout 8 --max-time 25 "$source_url/$file" -o "$dir/$file"
 done
 (cd "$dir" && sha256sum -c <<'SHA256'
-f0adb7c6ba87b7c313a24d9e2d1565ec2bf18258370bfd6a5de3d995d459d57d  manager.sh
+bf023805529eaa925fee0964653ab86d518fa75a969997a39f94eb10e62e5fc0  manager.sh
 d96d8e1440c7b53ef47625820c77fe58c95a4ff0cef1f989d68c53ff099a7d7b  client-template.json
 SHA256
 )
@@ -77,21 +77,77 @@ wait_for_certificate() {
     return 1
 }
 
+choose_preset_name() {
+    local -n chosen_name=$1
+    local selection i
+    shift
+    local candidates=("$@")
+    for i in "${!candidates[@]}"; do option "$((i + 1))" "${candidates[i]}"; done
+    choose 1
+    [[ $selection =~ ^[1-9]$ ]] && (( selection <= ${#candidates[@]} )) || return 1
+    chosen_name=${candidates[selection-1]}
+}
+
+choose_preset_reality() {
+    local -n target=$1
+    local selection candidate i preferred='' auto=false
+    shift
+    if [[ ${1:-} == --auto ]]; then auto=true; shift; fi
+    local candidates=("$@")
+    if ! $auto; then
+        heading 'VLESS · REALITY 握手目标'
+        for i in "${!candidates[@]}"; do option "$((i + 1))" "${candidates[i]}"; done
+        option 9 '自动探测可用目标'
+        while true; do
+            choose 9
+            case "$selection" in
+                0) return 1 ;;
+                9) preferred=''; break ;;
+                [1-8]) preferred=${candidates[selection-1]}; break ;;
+                *) echo '无效选项。' ;;
+            esac
+        done
+    fi
+    if [[ -n $preferred ]]; then
+        if duo reality-probe "$preferred"; then
+            target=$preferred
+            return 0
+        fi
+        printf '%s 未通过探测，自动尝试其他目标。\n' "$preferred"
+    fi
+    for candidate in "${candidates[@]}"; do
+        [[ $candidate != "$preferred" ]] || continue
+        printf '正在探测 %s…\n' "$candidate"
+        if duo reality-probe "$candidate"; then
+            target=$candidate
+            return 0
+        fi
+    done
+    echo '候选站点均未通过探测。请检查 VPS 出站 TCP 443 和 DNS。'
+    return 2
+}
+
+five_deployed() {
+    [[ -e /etc/$five_service/config.json || -e /etc/systemd/system/$five_service.service ]]
+}
+
 quick_install() {
-    local domain ip ports='' uuid version='' answer detected port protocol resolved started reality_target='' target_index
+    local domain ip ports='' uuid version='' answer port protocol resolved started reality_target='' target_index candidate
+    local mode=1 reality_sni='' preset_names='' preset_name automatic=false
+    local reality_args=()
+    local preset_values=() package_args=()
     local reality_targets=(aws.amazon.com www.microsoft.com www.cloudflare.com www.amazon.com dl.google.com www.samsung.com www.intel.com)
     local protocol_ports=() protocol_labels=('VLESS / REALITY (TCP)' 'VMess WS (TCP)' 'Hysteria 2 (UDP)' 'TUIC (UDP)' 'AnyTLS (TCP)')
     local selection port_mode index
     local transports=(tcp tcp udp udp tcp)
-    if [[ -e /etc/$five_service/config.json || -e /etc/systemd/system/$five_service.service ]]; then
+    if five_deployed; then
         echo '已检测到五协议配置。请到 4 管理服务，或到 5 查看节点与订阅。'
         return 0
     fi
 
     heading '一键安装 sing-box · 五协议'
     printf '%s\n' 'REALITY / VMess WS + TLS / Hysteria 2 / TUIC / AnyTLS' \
-        '请将域名直接解析到 VPS，并在云防火墙放行 TCP 80 供 Caddy 签发或续期。' \
-        '已有主备服务可继续运行。新五协议使用另外分配的端口。'
+        '公信证书模式需要将站点域名解析到 VPS，并放行公网 TCP 80。'
     heading '1/5  官方内核'
     option 1 '使用已安装的官方内核；新机安装 APT 稳定版'
         option 2 '指定官方 APT 版本（运行中的 JC 服务会短暂重启）'
@@ -107,49 +163,117 @@ quick_install() {
         *) echo '无效选项。'; return 1 ;;
     esac
     heading '2/5  域名和证书'
-    option 1 '使用自己的域名作为 REALITY 目标'
-    option 2 '从常用站点选择 REALITY 目标'
+    option 1 '自有域名与公信证书'
+    option 2 '无自有域名 · 全自动自签'
     choose 1
     case "$selection" in
         0) return 0 ;;
-        1) ;;
-        2)
-            heading 'REALITY 握手目标'
-            for target_index in "${!reality_targets[@]}"; do
-                option "$((target_index + 1))" "${reality_targets[target_index]}"
+        1|2) mode=$selection ;;
+        *) echo '无效选项。'; return 1 ;;
+    esac
+    if [[ $mode == 2 ]]; then
+        domain=-
+        package_args=(--no-caddy)
+        option 1 '全自动（优先 IPv4，失败时尝试 IPv6）'
+        option 2 '高级调整（手动填写 IPv4 / IPv6，按协议选站点）'
+        choose 1
+        case "$selection" in
+            0) return 0 ;;
+            1)
+                automatic=true
+                reality_args=(--auto)
+                ip=$(duo detect-address 4 2>/dev/null) || ip=$(duo detect-address 6 2>/dev/null) ||
+                    { echo '无法自动检测公网 IP，请返回模式二并选择高级调整。'; return 1; }
+                preset_values=(www.bing.com www.bing.com www.bing.com www.bing.com)
+                ;;
+            2) ;;
+            *) echo '无效选项。'; return 1 ;;
+        esac
+        choose_preset_reality reality_target "${reality_args[@]}" apple.com "${reality_targets[@]}" || {
+            [[ $? == 1 ]] && return 0
+            return 1
+        }
+        if ! $automatic; then
+            printf '已选 REALITY 目标与 SNI：%s\n' "$reality_target"
+            for protocol in 'VMess WS Host' 'Hysteria 2 SNI' 'TUIC SNI' 'AnyTLS SNI'; do
+                heading "$protocol"
+                choose_preset_name preset_name www.bing.com www.microsoft.com www.cloudflare.com www.amazon.com || return 0
+                preset_values+=("$preset_name")
             done
-            choose 0
-            case "$selection" in
-                0) return 0 ;;
-                [1-7]) reality_target=${reality_targets[selection-1]} ;;
-                *) echo '无效选项。'; return 1 ;;
-            esac
-            printf 'REALITY 握手目标 %s:443 · REALITY SNI %s\n' "$reality_target" "$reality_target"
-            echo 'REALITY 的目标和 SNI 已选好。接下来请输入你自己的域名，用于另外四个协议的 TLS 证书和 HTTPS 订阅。'
-            ;;
-        *) echo '无效选项。'; return 1 ;;
-    esac
-    detected=$(jq -r '.inbounds[0].tls.server_name // empty' /etc/sing-box-reality/config.json 2>/dev/null || true)
-    read -r -p "站点域名${detected:+ [回车使用 $detected]}（0 返回）：" domain </dev/tty || return 1
-    [[ $domain != 0 ]] || return 0
-    domain=${domain:-$detected}
-    [[ $domain =~ ^[a-z0-9][a-z0-9.-]*\.[a-z][a-z0-9-]*$ ]] || { echo '请输入有效的小写域名。'; return 1; }
-    read -r -p 'VPS 公网 IPv4 或 IPv6（0 返回）：' ip </dev/tty || return 1
-    [[ $ip != 0 ]] || return 0
-    duo validate-install "$domain" "$ip" || return 1
-
-    heading '3/5  五协议端口'
-    option 1 '自动选择五个可用端口'
-    option 2 '手动指定五个端口'
-    choose 1
-    case "$selection" in
-        0) return 0 ;;
-        1|2) port_mode=$selection ;;
-        *) echo '无效选项。'; return 1 ;;
-    esac
-    if [[ $port_mode == 2 ]]; then
-        echo '每项回车自动选择 10000–65535 内的可用端口，输入 0 返回。'
+        fi
+        preset_names=$(IFS=,; printf '%s' "${preset_values[*]}")
+    else
+        heading 'REALITY 握手目标'
+        option 1 '使用自己的域名作为 REALITY 目标'
+        option 2 '从常用站点手动选择 REALITY 目标'
+        option 3 '自动探测并选择常用 REALITY 目标'
+        option 4 '手动输入其他 REALITY 目标域名'
+        choose 1
+        case "$selection" in
+            0) return 0 ;;
+            1) ;;
+            2)
+                heading 'REALITY 握手目标'
+                for target_index in "${!reality_targets[@]}"; do
+                    option "$((target_index + 1))" "${reality_targets[target_index]}"
+                done
+                choose 0
+                case "$selection" in
+                    0) return 0 ;;
+                    [1-7]) reality_target=${reality_targets[selection-1]} ;;
+                    *) echo '无效选项。'; return 1 ;;
+                esac
+                ;;
+            3)
+                echo '正在从 VPS 探测候选站点的 TLS 1.3 和 HTTP/2…'
+                for candidate in "${reality_targets[@]}"; do
+                    if duo reality-probe "$candidate"; then
+                        reality_target=$candidate
+                        break
+                    fi
+                done
+                [[ -n $reality_target ]] || { echo '暂未找到可用目标，请重试或手动选择。'; return 1; }
+                ;;
+            4)
+                read -r -p 'REALITY 目标域名（0 返回）：' reality_target </dev/tty || return 1
+                [[ $reality_target != 0 ]] || return 0
+                read -r -p "REALITY SNI（回车使用 $reality_target，0 返回）：" reality_sni </dev/tty || return 1
+                [[ $reality_sni != 0 ]] || return 0
+                duo reality-probe "$reality_target" "${reality_sni:-$reality_target}" ||
+                    { echo '目标未通过 TLS 1.3 和 HTTP/2 检查。'; return 1; }
+                ;;
+            *) echo '无效选项。'; return 1 ;;
+        esac
+        if [[ -n $reality_target ]]; then
+            printf 'REALITY 握手目标 %s:443 · REALITY SNI %s\n' "$reality_target" "${reality_sni:-$reality_target}"
+            echo '请填写自己的站点域名，用于另外四个协议的 TLS 证书和 HTTPS 订阅。'
+        fi
+        read -r -p '自己的站点域名（0 返回）：' domain </dev/tty || return 1
+        [[ $domain != 0 ]] || return 0
+        [[ $domain =~ ^[a-z0-9][a-z0-9.-]*\.[a-z][a-z0-9-]*$ ]] || { echo '请输入有效的小写域名。'; return 1; }
+        if [[ $domain == "$reality_target" ]]; then
+            echo '站点域名和外部目标相同，请选择选项 1 使用本机 REALITY 目标。'
+            return 1
+        fi
     fi
+    port_mode=1
+    if ! $automatic; then
+        read -r -p 'VPS 公网 IPv4 或 IPv6（0 返回）：' ip </dev/tty || return 1
+        [[ $ip != 0 ]] || return 0
+        heading '3/5  五协议端口'
+        option 1 '自动选择五个可用端口'
+        option 2 '手动指定五个端口'
+        choose 1
+        case "$selection" in
+            0) return 0 ;;
+            1|2) port_mode=$selection ;;
+            *) echo '无效选项。'; return 1 ;;
+        esac
+        if [[ $port_mode == 2 ]]; then
+            echo '每项回车自动选择 10000–65535 内的可用端口，输入 0 返回。'
+        fi
+    fi
+    duo validate-install "$domain" "$ip" || return 1
     for index in "${!protocol_labels[@]}"; do
         protocol=${protocol_labels[index]}
         port=''
@@ -168,30 +292,41 @@ quick_install() {
         fi
         if [[ -z $port ]]; then
             port=$(duo pick-port "${transports[index]}" "${protocol_ports[@]}") || return 1
-            printf '  %s 已自动选定：%s%s%s\n' "$protocol" "$green" "$port" "$reset"
+            if ! $automatic; then printf '  %s 已自动选定：%s%s%s\n' "$protocol" "$green" "$port" "$reset"; fi
         fi
         protocol_ports+=("$port")
     done
     ports=$(IFS=,; printf '%s' "${protocol_ports[*]}")
-    heading '4/5  节点凭据'
-    option 1 '自动生成 UUID（回车默认）'
-    option 2 '自定义 UUID'
-    choose 1
-    case "$selection" in
-        0) return 0 ;;
-        1) read -r uuid </proc/sys/kernel/random/uuid || return 1 ;;
-        2)
-            read -r -p "${yellow}请输入 UUID（0 返回）：$reset" uuid </dev/tty || return 1
-            [[ $uuid != 0 ]] || return 0
-            [[ -n $uuid ]] || { echo 'UUID 不能为空。'; return 1; } ;;
-        *) echo '无效选项。'; return 1 ;;
-    esac
+    if $automatic; then
+        read -r uuid </proc/sys/kernel/random/uuid || return 1
+    else
+        heading '4/5  节点凭据'
+        option 1 '自动生成 UUID（回车默认）'
+        option 2 '自定义 UUID'
+        choose 1
+        case "$selection" in
+            0) return 0 ;;
+            1) read -r uuid </proc/sys/kernel/random/uuid || return 1 ;;
+            2)
+                read -r -p "${yellow}请输入 UUID（0 返回）：$reset" uuid </dev/tty || return 1
+                [[ $uuid != 0 ]] || return 0
+                [[ -n $uuid ]] || { echo 'UUID 不能为空。'; return 1; } ;;
+            *) echo '无效选项。'; return 1 ;;
+        esac
+    fi
     duo validate-install "$domain" "$ip" "$ports" "$uuid" || return 1
     printf '已确认 UUID：%s%s%s\n' "$green" "$uuid" "$reset"
     heading '5/5  确认安装'
-    printf '域名 %s · 节点地址 %s\n' "$domain" "$ip"
-    if [[ -n $reality_target ]]; then
-        printf 'REALITY 目标 %s:443。HTTPS 订阅发布后使用自有域名的 TCP 8443。\n' "$reality_target"
+    if [[ $mode == 2 ]]; then
+        printf '无自有域名 · 节点地址 %s\nREALITY %s:443 · SNI %s\n' "$ip" "$reality_target" "$reality_target"
+        printf 'VMess WS Host %s\nHysteria 2 SNI %s\nTUIC SNI %s\nAnyTLS SNI %s\n' "${preset_values[@]}"
+        echo 'VMess WS 不启用 TLS。后三个协议使用公钥固定，请导入 sing-box JSON。'
+    else
+        printf '站点域名 %s · 节点地址 %s\n' "$domain" "$ip"
+        if [[ -n $reality_target ]]; then
+            printf 'REALITY %s:443 · SNI %s。HTTPS 订阅使用自有域名 TCP 8443。\n' \
+                "$reality_target" "${reality_sni:-$reality_target}"
+        fi
     fi
     for protocol in "${!protocol_labels[@]}"; do
         port=${protocol_ports[protocol]}
@@ -200,7 +335,7 @@ quick_install() {
     echo '安装后按输出放行各节点端口，再进行客户端验收。'
     read -r -p "${yellow}开始安装？[Y/n，回车确认] $reset" answer </dev/tty || return 1
     [[ ${answer:-y} == [yY] ]] || return 0
-    if ! certificate_ready "$domain"; then
+    if [[ $mode == 1 ]] && ! certificate_ready "$domain"; then
         resolved=$(timeout 5 getent ahosts "$domain" | awk '$2 == "STREAM" && !seen[$1]++ {print $1}') || resolved=''
         if [[ -z $resolved ]]; then
             printf '%s域名 %s 尚未解析到可用地址。请检查 A/AAAA 记录后重试。%s\n' "$red" "$domain" "$reset" >&2
@@ -209,25 +344,38 @@ quick_install() {
         printf '当前 DNS 解析结果（应指向这台 VPS）\n%s\n' "$resolved"
     fi
     if [[ -n $version ]]; then
-        duo packages --restart-managed --version "$version" || return 1
-    elif [[ ! -x /usr/bin/sing-box ]] || ! command -v caddy >/dev/null; then
-        duo packages || return 1
+        duo packages "${package_args[@]}" --restart-managed --version "$version" || return 1
+    elif [[ ! -x /usr/bin/sing-box ]] || { [[ $mode == 1 ]] && ! command -v caddy >/dev/null; }; then
+        duo packages "${package_args[@]}" || return 1
     fi
-    if ! certificate_ready "$domain"; then
+    if [[ $mode == 1 ]] && ! certificate_ready "$domain"; then
         started=$(date +%s)
         duo site "$domain" && wait_for_certificate "$domain" "$started" || return 1
-    else
+    elif [[ $mode == 1 ]]; then
         echo 'Caddy 公信证书已就绪，继续安装。'
     fi
     local target_args=()
     if [[ -n $reality_target ]]; then target_args=(--reality-target "$reality_target"); fi
+    if [[ -n $reality_sni ]]; then target_args+=(--reality-sni "$reality_sni"); fi
+    if [[ $mode == 2 ]]; then target_args+=(--preset-names "$preset_names"); fi
     duo five "$domain" "$ip" --ports "$ports" --uuid "$uuid" "${target_args[@]}" || return 1
-    printf '\n%s五协议安装成功 · 本机监听已确认%s\n' "$green" "$reset"
-    echo '请在云防火墙放行上面列出的 TCP/UDP 端口。外网验收通过后，在主菜单 4 启用开机启动。'
-    option 1 '查看五条节点链接和二维码（含凭据）'
-    option 2 '稍后在客户端与订阅菜单查看'
-    choose 1
-    if [[ $selection == 1 ]]; then duo five-share || return 1; fi
+    printf '\n%s五协议安装成功 · 本机监听已确认 · 已启用开机自启%s\n' "$green" "$reset"
+    echo '请在云防火墙放行上面列出的 TCP/UDP 端口，再从客户端逐条验证。'
+    if [[ $mode == 2 ]]; then
+        option 1 '生成 v2rayN 兼容链接和二维码（需确认）'
+        option 2 '查看普通链接和公钥固定 JSON'
+        option 3 '稍后查看'
+        choose 1
+        case "$selection" in
+            1) duo five-share --v2rayn || return 1 ;;
+            2) duo five-share || return 1 ;;
+        esac
+    else
+        option 1 '查看节点链接和配置文件（含凭据）'
+        option 2 '稍后在客户端与订阅菜单查看'
+        choose 1
+        if [[ $selection == 1 ]]; then duo five-share || return 1; fi
+    fi
 }
 
 if [[ -t 1 && "${TERM:-dumb}" != dumb && -z "${NO_COLOR:-}" ]]; then
@@ -243,15 +391,34 @@ choose() {
     selection=${selection:-$1}
 }
 
+address_menu() {
+    local selection address
+    heading '刷新节点地址'
+    option 1 '检测公网 IPv4'
+    option 2 '检测公网 IPv6'
+    option 3 '手动输入公网地址'
+    choose 0
+    case "$selection" in
+        0) return ;;
+        1) address=--ipv4 ;;
+        2) address=--ipv6 ;;
+        3)
+            read -r -p '公网 IPv4 或 IPv6（0 返回）：' address </dev/tty || return
+            [[ $address != 0 ]] || return ;;
+        *) echo '无效选项。'; return ;;
+    esac
+    duo five-address "$address" || true
+}
+
 client_menu() {
-    local ip default_option
+    local default_option
     while true; do
         heading '客户端与订阅'
-        option 1 '查看五协议节点链接和二维码'
+        option 1 '查看节点链接和配置文件'
         option 2 '发布五协议单节点及聚合订阅'
         option 3 '查看五协议客户端验收步骤'
-        option 4 '旧双协议：导出 sing-box JSON（固定 IPv4）'
-        option 5 '旧双协议：发布或更新 HTTPS 订阅'
+        option 4 '刷新节点地址（IPv4 / IPv6）'
+        if [[ -s /etc/$five_service/local-tls.crt ]]; then option 5 'v2rayN 兼容链接与二维码（自签模式）'; fi
         default_option=3
         if [[ -s /etc/$five_service/profiles/links.txt ]]; then default_option=1; fi
         choose "$default_option"
@@ -260,16 +427,9 @@ client_menu() {
             1) duo five-share || echo '请先完成五协议安装。' ;;
             2) duo five-share --publish || echo '发布未完成，请检查上方信息。' ;;
             3) printf '%s\n' '导入五协议节点链接，或将 sing-box JSON 导入客户端。' \
-                   '逐条切换为活动节点并打开网页，确认连接和出口地址。' \
-                   '实测通过后，可在「服务管理」启用五协议开机启动。' ;;
-            4|5)
-                read -r -p '请输入 VPS 公网 IPv4（0 返回）：' ip </dev/tty || return
-                [[ "$ip" == 0 ]] && continue
-                if [[ "$selection" == 4 ]]; then
-                    duo export "$ip" "$HOME/jc-client-$(date +%s).json" || true
-                else
-                    duo publish "$ip" || true
-                fi ;;
+                   '逐条切换为活动节点并打开网页，确认连接和出口地址。' ;;
+            4) address_menu ;;
+            5) duo five-share --v2rayn || true ;;
             *) echo '无效选项。' ;;
         esac
     done
@@ -343,29 +503,7 @@ core_menu() {
     done
 }
 
-custom_menu() {
-    while true; do
-        heading '自定义规则与备用端口'
-        option 1 '为 Hysteria 2 更新国内目的地拒绝规则'
-        option 2 '为 REALITY 更新国内目的地拒绝规则'
-        option 3 '设置 Hysteria 2 UDP 跳跃范围'
-        choose 1
-        case "$selection" in
-            0) return ;;
-            1|2)
-                service=sing-box-hy2
-                [[ "$selection" == 2 ]] && service=sing-box-reality
-                read -r -p "短暂重启 $service，请确认 SSH 走另一条线路 [Y/N]：" answer </dev/tty || return
-                if [[ "$answer" == y || "$answer" == Y ]]; then duo rules "$service" || true; fi ;;
-            3)
-                read -r -p '输入 UDP 起止端口，用空格分隔（0 返回）：' first last </dev/tty || return
-                [[ "$first" == 0 ]] || duo hopping "$first" "$last" || true ;;
-            *) echo '无效选项。' ;;
-        esac
-    done
-}
-
-install_shortcut() {
+install_lowercase_shortcut() {
     local target=/usr/local/bin/jc temp
     if [[ -e "$target" || -L "$target" ]]; then
         if [[ -f "$target" && ! -L "$target" && -x "$target" ]] &&
@@ -385,7 +523,7 @@ install_shortcut() {
         cat <<'DUOSH'
 f=$(mktemp)
 trap 'rm -f "$f"' EXIT
-curl -4 -fsSL --connect-timeout 8 --max-time 25 "https://raw.githubusercontent.com/LauritzWu/lauritz-duo/$revision/bootstrap.sh" -o "$f"
+curl -4 -fsSL --connect-timeout 8 --max-time 25 "https://raw.githubusercontent.com/LauritzWu/jc-vps/$revision/bootstrap.sh" -o "$f"
 bash "$f" "$revision"
 DUOSH
     } > "$temp" || ! chmod 0755 "$temp" || ! mv -fT -- "$temp" "$target"; then
@@ -393,6 +531,20 @@ DUOSH
         return 1
     fi
     printf 'jc 快捷命令已安装（%s）。\n' "$revision"
+}
+
+install_shortcut() {
+    local alias_path=/usr/local/bin/JC
+    install_lowercase_shortcut || return 1
+    if [[ -L $alias_path && $(readlink -- "$alias_path") == jc ]]; then
+        return 0
+    fi
+    if [[ -e $alias_path || -L $alias_path ]]; then
+        printf '发现其他程序使用 %s，保留原文件。可继续使用 jc。\n' "$alias_path" >&2
+        return 1
+    fi
+    ln -sT -- jc "$alias_path" || return 1
+    echo 'JC 快捷命令已安装。'
 }
 
 init_tools() {
@@ -405,27 +557,36 @@ init_tools() {
         apt-get -o Acquire::ForceIPv4=true update &&
             apt-get -o Acquire::ForceIPv4=true install -y "${missing[@]}" || return 1
     fi
-    install_shortcut || printf '%s\n' '快捷命令未安装，仍可继续使用本次菜单。' >&2
+    install_shortcut || printf '%s\n' '快捷命令安装未全部完成，仍可继续使用本次菜单。' >&2
 }
 
 shortcut_menu() {
-    local target=/usr/local/bin/jc
+    local target=/usr/local/bin/jc alias_path=/usr/local/bin/JC answer
+    local shortcuts=()
     while true; do
         heading '管理 JC 快捷命令'
-        option 1 '安装 jc 快捷命令'
-        option 2 '卸载 jc 快捷命令（节点服务继续运行）'
+        option 1 '安装 jc / JC 快捷命令'
+        option 2 '卸载 jc / JC 快捷命令（节点服务继续运行）'
         choose 1
         case "$selection" in
             0) return ;;
             1) install_shortcut || true ;;
             2)
-                if [[ ! -f "$target" || -L "$target" ]] || ! grep -qxF -e '# Managed by JC' -e '# Managed by Lauritz Duo' "$target"; then
+                shortcuts=()
+                if [[ -L $alias_path && $(readlink -- "$alias_path") == jc ]]; then
+                    shortcuts+=("$alias_path")
+                fi
+                if [[ -f $target && ! -L $target ]] &&
+                    grep -qxF -e '# Managed by JC' -e '# Managed by Lauritz Duo' "$target"; then
+                    shortcuts+=("$target")
+                fi
+                if (( ! ${#shortcuts[@]} )); then
                     echo '未发现由 JC 安装的快捷命令。'
                     continue
                 fi
-                read -r -p '卸载 jc 快捷命令？[Y/N] ' answer </dev/tty || return
-                if [[ "$answer" == y || "$answer" == Y ]]; then
-                    rm -f -- "$target" && echo '快捷命令已卸载。'
+                read -r -p '卸载 jc / JC 快捷命令？[Y/N] ' answer </dev/tty || return
+                if [[ $answer == [yY] ]]; then
+                    rm -f -- "${shortcuts[@]}" && echo '快捷命令已卸载。'
                 fi ;;
             *) echo '无效选项。' ;;
         esac
@@ -478,7 +639,7 @@ detect_region() {
 }
 
 vps_summary() {
-    local os ipv4 ipv6 region kernel active unit state names
+    local os ipv4 ipv6 region kernel state autostart
     os=$(awk -F= '$1=="PRETTY_NAME" {print substr($0,index($0,"=")+1); exit}' /etc/os-release 2>/dev/null || true)
     os=${os#\"}; os=${os%\"}
     ipv4=$(ip -o -4 addr show scope global 2>/dev/null | awk '{sub(/\/.*/,"",$4); printf "%s%s", sep,$4; sep="  "}' || true)
@@ -493,20 +654,39 @@ vps_summary() {
         kernel=$(/usr/bin/sing-box version 2>/dev/null | sed -n '1p' || true)
         kernel=${kernel#sing-box version }
     fi
-    names=(REALITY HY2 五协议)
-    active=''
-    local idx=0
-    for unit in sing-box-reality sing-box-hy2 "$five_service"; do
+    state='未安装'
+    if systemctl is-active --quiet "$five_service" 2>/dev/null; then
+        state='运行中'
+    elif [[ -s /etc/$five_service/config.json ]]; then
         state='未运行'
-        if systemctl is-active --quiet "$unit" 2>/dev/null; then state='运行中'; fi
-        active+="${names[idx]} $state  "
-        idx=$((idx+1))
-    done
+    fi
     heading 'VPS 概况'
     printf ' 主机  %s    系统  %s\n' "$(hostname)" "${os:-未知}"
     printf ' Linux %s    架构  %s    sing-box  %s\n' "$(uname -r)" "$(uname -m)" "${kernel:-未检测到}"
     printf ' IPv4  %s\n IPv6  %s\n' "${ipv4:-未检测到}" "${ipv6:-未检测到}"
-    printf ' 地区  %s\n 服务  %s\n' "${region:-未能识别（系统工具可手动覆盖）}" "$active"
+    printf ' 地区  %s\n 服务  五协议 %s' "${region:-未能识别（系统工具可手动覆盖）}" "$state"
+    if [[ $state != 未安装 ]]; then
+        autostart='未启用'
+        if systemctl is-enabled --quiet "$five_service" 2>/dev/null; then autostart='已启用'; fi
+        printf ' · 开机自启%s' "$autostart"
+    fi
+    printf '\n'
+}
+
+status_menu() {
+    local selection
+    while true; do
+        heading '服务状态'
+        option 1 '查看服务状态和本机监听'
+        option 2 '查看五协议最近 50 条运行日志'
+        choose 1
+        case "$selection" in
+            0) return ;;
+            1) duo status || true ;;
+            2) journalctl -u "$five_service.service" -n 50 --no-pager || true ;;
+            *) echo '无效选项。' ;;
+        esac
+    done
 }
 
 service_menu() {
@@ -515,16 +695,13 @@ service_menu() {
     while true; do
         heading '服务管理'
         option 1 '启动或恢复五协议服务'
-        option 2 '五协议设为开机启动（客户端验收后）'
-        option 3 '启动已有 REALITY / HY2 主备'
-        option 4 '已有主备设为开机启动（客户端验收后）'
-        option 5 '更换单个五协议节点的端口'
+        option 2 '启用五协议开机自启（已有部署）'
+        option 3 '更换单个五协议节点的端口'
         choose 1
         case "$selection" in
             0) return ;;
             1) systemctl start "$five_service" && echo '五协议服务已启动。' ;;
-            3) systemctl start sing-box-reality sing-box-hy2 && echo '现有主备已启动。' ;;
-            5)
+            3)
                 heading '选择要换端口的协议'
                 option 1 'REALITY (TCP)'
                 option 2 'VMess WS (TCP)'
@@ -539,33 +716,13 @@ service_menu() {
                 printf '请先在云防火墙放行新端口。应用时五协议服务会短暂重启。\n'
                 read -r -p '确认切换端口？[y/N] ' answer </dev/tty || return
                 if [[ $answer == [yY] ]]; then duo five-port "$kind" "$port" || true; fi ;;
-            2|4)
-                local services=("$five_service")
-                if [[ $selection == 4 ]]; then services=(sing-box-reality sing-box-hy2); fi
-                read -r -p '客户端验收已经通过？[Y/N] ' answer </dev/tty || return
-                if [[ $answer == y || $answer == Y ]]; then
-                    local service ready=1
-                    for service in "${services[@]}"; do
-                        systemctl is-active --quiet "$service" || ready=0
-                    done
-                    if (( ready )); then systemctl enable "${services[@]}" || true
-                    else echo '请先启动服务并完成外网验收。'; fi
+            2)
+                read -r -p '启用五协议开机自启？[y/N] ' answer </dev/tty || return
+                if [[ $answer == [yY] ]]; then
+                    if systemctl is-active --quiet "$five_service"; then
+                        systemctl enable "$five_service" && echo '已启用五协议开机自启。'
+                    else echo '请先启动五协议服务。'; fi
                 fi ;;
-            *) echo '无效选项。' ;;
-        esac
-    done
-}
-
-network_menu() {
-    while true; do
-        heading '网络与防火墙'
-        option 1 '监听端口与防火墙'
-        option 2 '国内规则与 UDP 跳跃'
-        choose 1
-        case "$selection" in
-            0) return ;;
-            1) firewall_menu ;;
-            2) custom_menu ;;
             *) echo '无效选项。' ;;
         esac
     done
@@ -575,7 +732,7 @@ tools_menu() {
     while true; do
         heading '系统工具'
         option 1 '查看或更新官方内核'
-        option 2 '安装或卸载 jc 快捷命令'
+        option 2 '安装或卸载 jc / JC 快捷命令'
         option 3 '手动覆盖服务器地区'
         option 4 '查看全部命令'
         option 5 '补齐快捷命令和基础组件'
@@ -650,7 +807,13 @@ while true; do
     width=$(home_width)
     home_banner "$width"
     heading '管理菜单'
-    option 1 '一键安装 sing-box' "$green"
+    deployed=false
+    if five_deployed; then
+        deployed=true
+        option 1 '一键安装 sing-box（五协议已部署）' "$green"
+    else
+        option 1 '一键安装 sing-box' "$green"
+    fi
     option 2 '完整卸载 sing-box 和 JC' "$red"
     option 3 '服务状态'
     option 4 '服务管理'
@@ -660,13 +823,23 @@ while true; do
     option 0 '退出'
     home_rule "$width"
     vps_summary
-    if [[ ! -s /etc/$five_service/config.json &&
-        ! -s /etc/sing-box-reality/config.json && ! -s /etc/sing-box-hy2/config.json ]]; then
-        printf '%s尚未部署 JC 节点，请先选择 1 安装。%s\n' "$yellow" "$reset"
+    if [[ -s /etc/$five_service/config.json ]]; then
+        heading '五协议节点 · 配置端口'
+        duo five-summary || true
+    elif ! $deployed; then
+        printf '%s尚未部署 JC 节点，按 1 或回车安装。%s\n' "$yellow" "$reset"
     fi
     home_rule "$width"
-    read -r -p "${yellow}请选择 [回车默认 1 安装，0 退出]：$reset" selection </dev/tty || exit 1
-    case "${selection:-1}" in
+    if $deployed; then
+        while true; do
+            read -r -p "${yellow}请输入序号 [0–7]：$reset" selection </dev/tty || exit 1
+            [[ -n $selection ]] && break
+        done
+    else
+        read -r -p "${yellow}请选择 [回车默认 1 安装，0 退出]：$reset" selection </dev/tty || exit 1
+        selection=${selection:-1}
+    fi
+    case "$selection" in
         1)
             quick_install || echo '安装未完成，请查看上面的报错。'
             pause_menu ;;
@@ -676,10 +849,10 @@ while true; do
                     's=$(curl -4fsSL -m 25 "https://raw.githubusercontent.com/LauritzWu/jc-vps/$revision/bootstrap.sh") && bash -c "$s" -- "$revision"'
                 exit 0
             fi ;;
-        3) duo status || true ;;
+        3) status_menu ;;
         4) service_menu ;;
         5) client_menu ;;
-        6) network_menu ;;
+        6) firewall_menu ;;
         7) tools_menu ;;
         0) exit 0 ;;
         *) printf '%s\n' '无效选项。' >&2 ;;
