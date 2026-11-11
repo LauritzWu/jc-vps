@@ -83,6 +83,8 @@ fi
 change_five_address 2606:4700::2 <<<n
 [[ $(sha256sum "$dir/config.json" "$dir/profiles/links.txt" "$profiles/five/all.json") == "$before" ]]
 (
+    scratch=$(mktemp -d "$test_dir/address.XXXXXX")
+    trap cleanup EXIT
     curl() { printf '%s\n' '{"success":true,"ip":"2606:4700::2"}'; }
     change_five_address --ipv6 <<<y
 )
