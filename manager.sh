@@ -86,6 +86,7 @@ packages() {
     local managed=false with_caddy=true version key=/etc/apt/keyrings/sagernet.asc source=/etc/apt/sources.list.d/sagernet.sources
     local apt=(apt-get -o Acquire::ForceIPv4=true)
     local target=(sing-box)
+    if [[ ${1:-} == --no-caddy ]]; then with_caddy=false; shift; fi
     if [[ ${1:-} == --restart-managed ]]; then managed=true; shift; fi
     version=${2:-}
     if (( $# )); then
@@ -281,12 +282,13 @@ reality_keys() {
     [[ $private =~ ^[A-Za-z0-9_-]{43}$ && $public =~ ^[A-Za-z0-9_-]{43}$ ]] || fail 'REALITY 密钥格式异常'
 }
 unit_file() {
-    local service=$1 cap=$2
+    local service=$1 cap=$2 dependencies=network-online.target
+    if [[ ${3:-} != --no-caddy ]]; then dependencies+=" caddy.service"; fi
     put "$units/$service.service" 644 root <<UNIT
 [Unit]
 Description=JC $service
-Wants=network-online.target caddy.service
-After=network-online.target caddy.service
+Wants=$dependencies
+After=$dependencies
 
 [Service]
 ExecStart=$core run -c $(cfg "$service")
@@ -610,7 +612,11 @@ five_deploy() {
         printf '\n' >>"$dir/$label.sub"
     done
     private_put "$(cfg "$five")" <"$scratch/server.json"
-    unit_file "$five" ' CAP_DAC_READ_SEARCH'
+    if [[ $domain == - ]]; then
+        unit_file "$five" ' CAP_DAC_READ_SEARCH' --no-caddy
+    else
+        unit_file "$five" ' CAP_DAC_READ_SEARCH'
+    fi
     systemctl daemon-reload
     started+=("$five")
     systemctl start "$five"

@@ -24,7 +24,7 @@ for file in manager.sh client-template.json; do
     curl -4 -fsSL --retry 2 --connect-timeout 8 --max-time 25 "$source_url/$file" -o "$dir/$file"
 done
 (cd "$dir" && sha256sum -c <<'SHA256'
-01d2d52f8322c87f94f99c150e8bfbf688328341ab21e48539cfc4a0e79dac4e  manager.sh
+3a0f85c7089ae83092b0178f5f64a8b6f6274a1db7fd5dd2dd77d1f42c150472  manager.sh
 d96d8e1440c7b53ef47625820c77fe58c95a4ff0cef1f989d68c53ff099a7d7b  client-template.json
 SHA256
 )
@@ -283,7 +283,7 @@ quick_install() {
     if [[ $mode == 1 ]] && ! certificate_ready "$domain"; then
         started=$(date +%s)
         duo site "$domain" && wait_for_certificate "$domain" "$started" || return 1
-    elif [[  == 1 ]]; then
+    elif [[ $mode == 1 ]]; then
         echo 'Caddy 公信证书已就绪，继续安装。'
     fi
     local target_args=()
