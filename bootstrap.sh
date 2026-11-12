@@ -308,8 +308,14 @@ quick_install() {
         *) return 0 ;;
     esac
     export JC_FIREWALL_MODE
-    read -r -p "${yellow}开始安装？[Y/n，回车确认] $reset" answer </dev/tty || return 1
-    [[ ${answer:-y} == [yY] ]] || return 0
+    while true; do
+        read -r -p "${yellow}开始安装？[回车或 Y 确认，N 取消，U 查看 UUID] $reset" answer </dev/tty || return 1
+        case "$answer" in
+            ''|[yY]) break ;;
+            [uU]) printf '节点 UUID（凭据，请妥善保管）：%s\n' "$uuid" ;;
+            *) return 0 ;;
+        esac
+    done
     if [[ $mode == 1 ]] && ! certificate_ready "$domain"; then
         resolved=$(timeout 5 getent ahosts "$domain" | awk '$2 == "STREAM" && !seen[$1]++ {print $1}') || resolved=''
         if [[ -z $resolved ]]; then
