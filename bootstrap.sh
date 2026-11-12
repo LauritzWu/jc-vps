@@ -25,7 +25,7 @@ for file in manager.sh client-template.json lib/firewall.sh; do
     curl -4 -fsSL --retry 2 --connect-timeout 8 --max-time 25 "$source_url/$file" -o "$dir/$file"
 done
 (cd "$dir" && sha256sum -c <<'SHA256'
-4e7254bab2800789479caa702e3177f82ac7c625de420151d1879a92c6beffc7  manager.sh
+a2ffbf22224f970e0ab10c388ed3ab44caff47bf4419fa4f202331a5b867e1b4  manager.sh
 d96d8e1440c7b53ef47625820c77fe58c95a4ff0cef1f989d68c53ff099a7d7b  client-template.json
 6dc765ad0e22eeeeed7d8edda757b79ab6cd67a4756970762a2ccb6c1f7fab42  lib/firewall.sh
 SHA256
