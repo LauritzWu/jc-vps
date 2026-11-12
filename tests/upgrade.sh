@@ -10,6 +10,7 @@ for scenario in unavailable install-failure start-failure success; do
     mkdir "$state"
     if (
         source <(sed '/^command_name=/,$d' "$root/manager.sh")
+        source "$root/lib/firewall.sh"
         scratch="$state/scratch"
         mkdir "$scratch"
         printf '1.14.4\n' >"$state/version"
