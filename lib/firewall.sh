@@ -55,9 +55,9 @@ fw_report() {
     printf 'UFW：%s · SSH 端口：%s · Fail2ban：%s\n' "$state" "${ssh_ports:-未知}" "${fail2ban:-未知}"
 }
 
-# Only the exact unrestricted, inbound allow rule is ours to remove. UFW
-# treats a new comment on an equivalent rule as an update, so skip existing
-# matches before adding a rule, including matches with someone else's comment.
+# With a tag, match only our exact inbound allow rule. Without a tag, match
+# any existing rule on the same tuple because UFW can replace its action,
+# logging and comment when adding a new rule.
 fw_rule_number() {
     local key=$1 tag=${2:-} family=${3:-}
     awk -v key="$key" -v tag="$tag" -v family="$family" '
@@ -70,17 +70,25 @@ fw_rule_number() {
             $0=parts[1]
             if (family == "4" && $2 == "(v6)") next
             if (family == "6" && $2 != "(v6)") next
-            if ($2 == "(v6)" && $6 == "(v6)" && NF == 6) {
-                $2=$3; $3=$4; $4=$5; NF=4
+            if ($2 == "(v6)" && $6 == "(v6)") {
+                $2=$3; $3=$4; $4=$5
+                for (i=7; i<=NF; i++) $(i-2)=$i
+                NF-=2
             }
-            if (NF==4 && $1==key && $2=="ALLOW" && $3=="IN" && $4=="Anywhere" &&
-                (tag=="" || (count==2 && parts[2]==tag))) {print number; exit}
+            if ($1==key && $3=="IN" && $4=="Anywhere") {
+                if (tag=="" && (NF==4 || (NF==5 && $5 ~ /^\(log(-all)?\)$/))) {
+                    print $2; exit
+                }
+                if (tag!="" && NF==4 && $2=="ALLOW" && count==2 && parts[2]==tag) {
+                    print number; exit
+                }
+            }
         }
     ' <<<"$fw_status"
 }
 
 fw_open() {
-    local key=$1 purpose=$2 port=${1%/*} proto=${1#*/} path tag rc family source ssh_ports
+    local key=$1 purpose=$2 port=${1%/*} proto=${1#*/} path tag rc family source ssh_ports existing
     [[ $fw_mode == smart ]] || return 0
     port_number "$port" && [[ $proto == tcp || $proto == udp ]] || return 1
     if [[ $proto == tcp ]]; then
@@ -108,7 +116,13 @@ fw_open() {
         else
             source=0.0.0.0/0
         fi
-        if [[ -n $(fw_rule_number "$key" '' "$family") ]]; then continue; fi
+        existing=$(fw_rule_number "$key" '' "$family") || return 1
+        if [[ -n $existing ]]; then
+            if [[ $existing != ALLOW ]]; then
+                printf '保留 IPv%s 上 %s 的既有 UFW %s 规则，请核对客户端连通性。\n' "$family" "$key" "$existing" >&2
+            fi
+            continue
+        fi
         mkdir -p -m 700 -- "$fw_dir" || return 1
         path="$fw_dir/$port-$proto-$family"
         # Record intent before invoking UFW so a killed process cannot orphan a rule.
@@ -257,4 +271,3 @@ wait_for_certificate() {
     if [[ -n $logs ]]; then printf '\nCaddy 最近的日志\n%s\n' "$logs" >&2; fi
     return 1
 }
-
