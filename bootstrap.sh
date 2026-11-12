@@ -25,9 +25,9 @@ for file in manager.sh client-template.json lib/firewall.sh; do
     curl -4 -fsSL --retry 2 --connect-timeout 8 --max-time 25 "$source_url/$file" -o "$dir/$file"
 done
 (cd "$dir" && sha256sum -c <<'SHA256'
-a2ffbf22224f970e0ab10c388ed3ab44caff47bf4419fa4f202331a5b867e1b4  manager.sh
+9cc00604fc53457311475373a8e8f301e91ba814f652c77a69b28910ac4a407b  manager.sh
 d96d8e1440c7b53ef47625820c77fe58c95a4ff0cef1f989d68c53ff099a7d7b  client-template.json
-6dc765ad0e22eeeeed7d8edda757b79ab6cd67a4756970762a2ccb6c1f7fab42  lib/firewall.sh
+ef3789f0e9601c7a93f82ec3342dadd827a29891a38286bbcc81de02f79a9ee6  lib/firewall.sh
 SHA256
 )
 source "$dir/lib/firewall.sh"
@@ -272,14 +272,15 @@ quick_install() {
             0) return 0 ;;
             1) read -r uuid </proc/sys/kernel/random/uuid || return 1 ;;
             2)
-                read -r -p "${yellow}请输入 UUID（0 返回）：$reset" uuid </dev/tty || return 1
+                read -r -s -p "${yellow}请输入 UUID（输入隐藏，0 返回）：$reset" uuid </dev/tty || return 1
+                printf '\n'
                 [[ $uuid != 0 ]] || return 0
                 [[ -n $uuid ]] || { echo 'UUID 不能为空。'; return 1; } ;;
             *) echo '无效选项。'; return 1 ;;
         esac
     fi
     duo validate-install "$domain" "$ip" "$ports" "$uuid" || return 1
-    printf '已确认 UUID：%s%s%s\n' "$green" "$uuid" "$reset"
+    echo '节点凭据已确认。安装后可在「客户端与订阅」查看节点链接。'
     heading '5/5  确认安装'
     if [[ $mode == 2 ]]; then
         printf '无自有域名 · 节点地址 %s\nREALITY %s:443 · SNI %s\n' "$ip" "$reality_target" "$reality_target"
@@ -329,7 +330,7 @@ quick_install() {
     if [[ $mode == 1 ]]; then target_args+=(--prepare-site yes); fi
     duo five "$domain" "$ip" --ports "$ports" --uuid "$uuid" "${target_args[@]}" || return 1
     printf '\n%s五协议安装成功 · 本机监听已确认 · 已启用开机自启%s\n' "$green" "$reset"
-    echo '请在云防火墙放行上面列出的 TCP/UDP 端口，再从客户端逐条验证。'
+    echo '请从客户端逐条验证。若云防火墙限制入站，请按上面列出的协议和端口放行。'
     if [[ $mode == 2 ]]; then
         option 1 '生成 v2rayN 兼容链接和二维码（需确认）'
         option 2 '查看普通链接和公钥固定 JSON'
@@ -683,7 +684,7 @@ service_menu() {
                 kind=${port_kinds[selection-1]}
                 read -r -p '新端口（0 返回）：' port </dev/tty || return
                 [[ $port != 0 ]] || continue
-                printf '请先在云防火墙放行新端口。应用时五协议服务会短暂重启。\n'
+                printf '若云防火墙限制入站，请先放行新端口。应用时五协议服务会短暂重启。\n'
                 read -r -p '确认切换端口？[y/N] ' answer </dev/tty || return
                 if [[ $answer == [yY] ]]; then duo five-port "$kind" "$port" || true; fi ;;
             2)
