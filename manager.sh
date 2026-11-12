@@ -289,11 +289,20 @@ CADDY
 site() {
     local domain=$1 started
     valid_domain "$domain"
+    caddy_port_available 80
     fw_open 80/tcp acme || fail '无法管理证书签发所需的 UFW 规则'
     if ! certificate_ready "$domain"; then
         started=$(date +%s)
         configure_site "$domain"
         wait_for_certificate "$domain" "$started" || fail 'Caddy 公信证书未就绪'
+    fi
+}
+
+caddy_port_available() {
+    local rows
+    rows=$(ss -H -lntp "( sport = :$1 )")
+    if [[ -n $rows ]] && grep -qv '"caddy"' <<<"$rows"; then
+        fail "TCP $1 已由其他服务监听"
     fi
 }
 reality_keys() {
@@ -1016,6 +1025,7 @@ CADDY
             done
         done
         if $external; then
+            caddy_port_available 8443
             fw_open 8443/tcp subscription || fail '无法管理 HTTPS 订阅的 UFW 规则'
             block=$(site_block "$domain")
             if grep -Eq '^[[:space:]]+bind[[:space:]]+127\.0\.0\.1[[:space:]]*$' <<<"$block"; then
