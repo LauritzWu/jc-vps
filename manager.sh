@@ -361,6 +361,7 @@ address_backup='' address_paths=()
 site_backup=''
 cleanup() {
     local code=$? name recovered=true
+    fw_report_unmanaged
     if (( code != 0 )); then
         if [[ -n $site_backup ]]; then
             if ! put "$caddyfile" 644 root <"$site_backup" || ! systemctl reload caddy; then
@@ -1037,7 +1038,7 @@ CADDY
                 reload_site "$scratch/Caddyfile"
             fi
             fw_commit || fail '无法保存 HTTPS 订阅防火墙规则'
-            echo '请在云防火墙放行 TCP 8443，并从外网验证 HTTPS 订阅。'
+            echo '请从外网验证 HTTPS 订阅。若云防火墙限制入站，请放行 TCP 8443。'
         fi
         site_backup=''
     fi
