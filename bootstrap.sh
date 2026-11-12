@@ -27,7 +27,7 @@ done
 (cd "$dir" && sha256sum -c <<'SHA256'
 4e7254bab2800789479caa702e3177f82ac7c625de420151d1879a92c6beffc7  manager.sh
 d96d8e1440c7b53ef47625820c77fe58c95a4ff0cef1f989d68c53ff099a7d7b  client-template.json
-e058e58573d3375502cb7f5d7a9a2c0c4e8116ac1a2104b5bc9d4cb6ba37da02  lib/firewall.sh
+6dc765ad0e22eeeeed7d8edda757b79ab6cd67a4756970762a2ccb6c1f7fab42  lib/firewall.sh
 SHA256
 )
 source "$dir/lib/firewall.sh"
