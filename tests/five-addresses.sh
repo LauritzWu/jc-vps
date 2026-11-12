@@ -5,6 +5,9 @@ root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 test_dir=$(mktemp -d)
 trap 'rm -rf -- "$test_dir"' EXIT
 source <(sed '/^command_name=/,$d' "$root/manager.sh")
+source "$root/lib/firewall.sh"
+fw_dir="$test_dir/firewall"
+fw_mode=manual
 template="$root/client-template.json"
 export XDG_CONFIG_HOME="$test_dir/settings"
 mkdir -p "$XDG_CONFIG_HOME/jc"
