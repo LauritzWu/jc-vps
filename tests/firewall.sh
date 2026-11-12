@@ -63,6 +63,9 @@ report=$(fw_report)
 if fw_open 22410/tcp node; then exit 1; fi
 active=no
 fw_open 2443/udp node
+fw_open 80/tcp acme
+summary=$(fw_report_unmanaged 2>&1)
+[[ $summary == *'2443/udp 80/tcp'* && $summary != *$'\n'* ]]
 [[ ! -s $mutations ]]
 active=yes
 fw_mode=manual

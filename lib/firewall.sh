@@ -5,6 +5,7 @@ fw_dir=/var/lib/jc/firewall
 fw_ufw_config=/etc/default/ufw
 fw_mode=smart
 fw_pending=()
+fw_unmanaged=()
 fw_status=''
 
 fw_load_mode() {
@@ -101,7 +102,7 @@ fw_open() {
     fw_status_read || {
         rc=$?
         if (( rc == 2 )); then
-            printf '本机 UFW 未启用或未安装，请检查 %s 的入站规则。\n' "$key" >&2
+            fw_unmanaged+=("$key")
             return 0
         fi
         return 1
@@ -133,6 +134,12 @@ fw_open() {
         LC_ALL=C ufw allow in proto "$proto" from "$source" to any port "$port" comment "$tag" || return 1
         fw_status_read && [[ -n $(fw_rule_number "$key" "$tag" "$family") ]] || return 1
     done
+}
+
+fw_report_unmanaged() {
+    if (( ${#fw_unmanaged[@]} )); then
+        printf '本机 UFW 未启用或未安装。若有入站限制，请检查这些端口是否已放行：%s。\n' "${fw_unmanaged[*]}" >&2
+    fi
 }
 
 fw_read() {
