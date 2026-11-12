@@ -79,6 +79,12 @@ fw_commit
 [[ $(wc -l <"$mutations") == 1 ]]
 grep -qxF '8443/tcp ALLOW IN Anywhere # operator' "$rules"
 
+# UFW can replace the action and logging on an existing exact tuple.
+printf '%s\n' '2444/tcp DENY IN Anywhere # operator' \
+    '2444/tcp (v6) LIMIT IN Anywhere (v6) (log) # operator' >>"$rules"
+fw_open 2444/tcp node
+[[ $(wc -l <"$mutations") == 1 ]]
+
 # Partial add failure and certificate rollback remove only new rules.
 fail_family=6
 if fw_open 2443/udp node; then exit 1; fi
