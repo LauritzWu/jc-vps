@@ -19,15 +19,18 @@ done
 printf '正在下载 JC 程序与模板（%s）…\n' "$revision"
 source_url="https://raw.githubusercontent.com/LauritzWu/jc-vps/$revision"
 dir=$(mktemp -d)
-trap 'rm -f "$dir/manager.sh" "$dir/client-template.json"; rmdir "$dir"' EXIT
-for file in manager.sh client-template.json; do
+mkdir "$dir/lib"
+trap 'rm -f "$dir/manager.sh" "$dir/client-template.json" "$dir/lib/firewall.sh"; rmdir "$dir/lib" "$dir"' EXIT
+for file in manager.sh client-template.json lib/firewall.sh; do
     curl -4 -fsSL --retry 2 --connect-timeout 8 --max-time 25 "$source_url/$file" -o "$dir/$file"
 done
 (cd "$dir" && sha256sum -c <<'SHA256'
-bf023805529eaa925fee0964653ab86d518fa75a969997a39f94eb10e62e5fc0  manager.sh
+4e7254bab2800789479caa702e3177f82ac7c625de420151d1879a92c6beffc7  manager.sh
 d96d8e1440c7b53ef47625820c77fe58c95a4ff0cef1f989d68c53ff099a7d7b  client-template.json
+e058e58573d3375502cb7f5d7a9a2c0c4e8116ac1a2104b5bc9d4cb6ba37da02  lib/firewall.sh
 SHA256
 )
+source "$dir/lib/firewall.sh"
 
 duo() {
     bash "$dir/manager.sh" "$@" </dev/tty
@@ -36,45 +39,6 @@ five_service=$(duo five-service)
 
 pause_menu() {
     read -r -p '按回车返回菜单：' </dev/tty || true
-}
-
-certificate_ready() {
-    curl -s --noproxy '*' --max-time 2 \
-        --resolve "$1:8443:127.0.0.1" "https://$1:8443/" -o /dev/null
-}
-
-wait_for_certificate() {
-    local domain=$1 started=$2 deadline=$((SECONDS + 90)) next_update=$((SECONDS + 15))
-    local logs listeners
-    if certificate_ready "$domain"; then
-        echo 'Caddy 公信证书已就绪。'
-        return 0
-    fi
-    listeners=$(ss -H -lnt '( sport = :80 )') || return 1
-    if [[ -z $listeners ]]; then
-        printf '%s%s%s\n' "$red" '本机 TCP 80 未监听，Caddy 无法处理 HTTP 签发验证。' "$reset" >&2
-        return 1
-    fi
-    echo '正在等待 Caddy 公信证书（最多约 90 秒）…'
-    while (( SECONDS < deadline )); do
-        if ! systemctl is-active --quiet caddy; then break; fi
-        if certificate_ready "$domain"; then
-            echo 'Caddy 公信证书已就绪。'
-            return 0
-        fi
-        if (( SECONDS >= next_update )); then
-            printf '仍在等待 %s 的签发结果…\n' "$domain"
-            next_update=$((SECONDS + 15))
-        fi
-        sleep 1
-    done
-    printf '%s%s%s\n' "$red" '证书暂未就绪。请核对域名 A/AAAA 记录和公网 TCP 80。修正后选 1 重试。' "$reset" >&2
-    logs=$(journalctl -u caddy --since "@$started" --no-pager -o cat 2>/dev/null | grep -F -- "$domain" | tail -n 8 || true)
-    if [[ -z $logs ]]; then
-        logs=$(journalctl -u caddy -n 8 --no-pager -o cat 2>/dev/null || true)
-    fi
-    if [[ -n $logs ]]; then printf '\nCaddy 最近的日志\n%s\n' "$logs" >&2; fi
-    return 1
 }
 
 choose_preset_name() {
@@ -132,7 +96,7 @@ five_deployed() {
 }
 
 quick_install() {
-    local domain ip ports='' uuid version='' answer port protocol resolved started reality_target='' target_index candidate
+    local domain ip ports='' uuid version='' answer port protocol resolved reality_target='' target_index candidate
     local mode=1 reality_sni='' preset_names='' preset_name automatic=false
     local reality_args=()
     local preset_values=() package_args=()
@@ -332,7 +296,17 @@ quick_install() {
         port=${protocol_ports[protocol]}
         printf '  %s：%s%s%s\n' "${protocol_labels[protocol]}" "$yellow" "$port" "$reset"
     done
-    echo '安装后按输出放行各节点端口，再进行客户端验收。'
+    duo firewall-status || return 1
+    option 1 '智能管理本机 UFW（默认）'
+    option 2 '手动管理防火墙'
+    choose 1
+    local JC_FIREWALL_MODE=smart
+    case "$selection" in
+        1) ;;
+        2) JC_FIREWALL_MODE=manual ;;
+        *) return 0 ;;
+    esac
+    export JC_FIREWALL_MODE
     read -r -p "${yellow}开始安装？[Y/n，回车确认] $reset" answer </dev/tty || return 1
     [[ ${answer:-y} == [yY] ]] || return 0
     if [[ $mode == 1 ]] && ! certificate_ready "$domain"; then
@@ -348,16 +322,11 @@ quick_install() {
     elif [[ ! -x /usr/bin/sing-box ]] || { [[ $mode == 1 ]] && ! command -v caddy >/dev/null; }; then
         duo packages "${package_args[@]}" || return 1
     fi
-    if [[ $mode == 1 ]] && ! certificate_ready "$domain"; then
-        started=$(date +%s)
-        duo site "$domain" && wait_for_certificate "$domain" "$started" || return 1
-    elif [[ $mode == 1 ]]; then
-        echo 'Caddy 公信证书已就绪，继续安装。'
-    fi
     local target_args=()
     if [[ -n $reality_target ]]; then target_args=(--reality-target "$reality_target"); fi
     if [[ -n $reality_sni ]]; then target_args+=(--reality-sni "$reality_sni"); fi
     if [[ $mode == 2 ]]; then target_args+=(--preset-names "$preset_names"); fi
+    if [[ $mode == 1 ]]; then target_args+=(--prepare-site yes); fi
     duo five "$domain" "$ip" --ports "$ports" --uuid "$uuid" "${target_args[@]}" || return 1
     printf '\n%s五协议安装成功 · 本机监听已确认 · 已启用开机自启%s\n' "$green" "$reset"
     echo '请在云防火墙放行上面列出的 TCP/UDP 端口，再从客户端逐条验证。'
@@ -460,6 +429,7 @@ firewall_menu() {
                     if [[ "$rule" =~ ^[0-9]{1,5}(:[0-9]{1,5})?/(tcp|udp)$ ]]; then ufw allow "$rule" || true; fi
                 fi ;;
             1)
+                duo firewall-status || true
                 ss -lntup '( sport = :22 or sport = :80 or sport = :443 or sport = :8443 )' || true
                 if command -v ufw >/dev/null; then LC_ALL=C ufw status verbose || true; fi
                 echo '云防火墙请在服务商后台放行相同端口。' ;;
