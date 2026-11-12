@@ -2,7 +2,7 @@
 set -euo pipefail
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-source <(sed -n '/^certificate_ready()/,/^quick_install()/ { /^quick_install()/d; p; }' "$root/bootstrap.sh")
+source "$root/lib/firewall.sh"
 red='' reset=''
 domain=example.com
 

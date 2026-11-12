@@ -87,12 +87,9 @@ reload_site() {
     caddy validate --config "$candidate" --adapter caddyfile
     backup="$caddyfile.duo.$(date +%s%N).bak"
     private_put "$backup" <"$caddyfile"
+    if [[ -z $site_backup ]]; then site_backup=$backup; fi
     put "$caddyfile" 644 root <"$candidate"
-    if ! systemctl reload caddy; then
-        put "$caddyfile" 644 root <"$backup"
-        systemctl reload caddy
-        fail 'Caddy 重载失败，已恢复原配置'
-    fi
+    systemctl reload caddy || fail 'Caddy 重载失败，正在恢复原配置'
 }
 packages() {
     local managed=false with_caddy=true version key=/etc/apt/keyrings/sagernet.asc source=/etc/apt/sources.list.d/sagernet.sources
@@ -238,7 +235,7 @@ uninstall() {
         printf '  %s\n' "${managed[@]}"
     fi
     printf '%s\n' '完整卸载 JC 将移除 sing-box 软件包及 JC 节点配置、凭据、订阅文件和快捷命令。' \
-        'Caddy 网站、证书、防火墙和手动保存的备份会保留。' \
+        '将清理闲置且由 JC 创建的 UFW 规则。Caddy 网站、证书及其在用规则会保留。' \
         '如果当前 SSH 经过这些节点，请先改用独立的管理连接。'
     printf '  %s1. 确认完整卸载（删除节点配置和凭据）%s\n  0. 取消并返回\n' "$red" "$reset"
     read -r -p "${yellow}请选择 [回车默认 0]：$reset" answer || return 2
@@ -251,12 +248,14 @@ uninstall() {
     fi
     if [[ $package == 'install ok installed' ]]; then dpkg --remove sing-box; fi
     rm -rf -- "${dirs[@]}"
+    fw_prune
+    rm -f -- "$fw_dir/mode"
     if (( ${#files[@]} )); then rm -f -- "${files[@]}"; fi
     systemctl daemon-reload
     printf '%sJC 已完整卸载。%s\n' "$green" "$reset"
     printf '重新安装请访问 https://github.com/LauritzWu/jc-vps/releases/latest\n'
 }
-site() {
+configure_site() {
     local first_line
     valid_domain "$1"
     if grep -qxF "$1:8443 {" "$caddyfile"; then
@@ -285,6 +284,26 @@ CADDY
     } >"$scratch/Caddyfile"
     reload_site "$scratch/Caddyfile"
     printf 'Caddy 已重载。证书签发需要公网 TCP 80。\n'
+}
+
+site() {
+    local domain=$1 started
+    valid_domain "$domain"
+    caddy_port_available 80
+    fw_open 80/tcp acme || fail '无法管理证书签发所需的 UFW 规则'
+    if ! certificate_ready "$domain"; then
+        started=$(date +%s)
+        configure_site "$domain"
+        wait_for_certificate "$domain" "$started" || fail 'Caddy 公信证书未就绪'
+    fi
+}
+
+caddy_port_available() {
+    local rows
+    rows=$(ss -H -lntp "( sport = :$1 )")
+    if [[ -n $rows ]] && grep -qv '"caddy"' <<<"$rows"; then
+        fail "TCP $1 已由其他服务监听"
+    fi
 }
 reality_keys() {
     local pair
@@ -339,9 +358,15 @@ created=() started=()
 upgrade_backup='' upgrade_running=()
 port_backup='' port_paths=()
 address_backup='' address_paths=()
+site_backup=''
 cleanup() {
     local code=$? name recovered=true
     if (( code != 0 )); then
+        if [[ -n $site_backup ]]; then
+            if ! put "$caddyfile" 644 root <"$site_backup" || ! systemctl reload caddy; then
+                printf 'Caddy 恢复待重试，备份位于 %s。\n' "$site_backup" >&2
+            fi
+        fi
         if [[ -n $address_backup ]]; then
             if restore_five_files "$address_backup" "${address_paths[@]}"; then
                 printf '已恢复原节点链接和订阅。备份位于 %s\n' "$address_backup" >&2
@@ -376,6 +401,7 @@ cleanup() {
         done
         for name in "${created[@]}"; do rm -rf -- "$name"; done
         if (( ${#started[@]} )); then systemctl daemon-reload || true; fi
+        fw_rollback
     fi
     rm -rf -- "$scratch"
 }
@@ -510,7 +536,7 @@ five_deploy() {
         dpkg-query -S "$core" >/dev/null || fail '请先安装官方 sing-box 软件包'
     else
         [[ -z $preset_names ]] || fail '预设名称仅用于无自有域名模式'
-        preflight "$domain"
+        valid_domain "$domain"
     fi
     if [[ -n $custom_sni ]]; then
         [[ -n $reality_target ]] || fail '单独设置 SNI 需要外部 REALITY 目标'
@@ -540,6 +566,13 @@ five_deploy() {
         rows=$(ss -H "$flag" "( sport = :$port )")
         [[ -z $rows ]] || fail "端口 $port 已被占用"
         listeners+=("$port/${protocols[i]}")
+    done
+    if [[ $domain != - ]]; then
+        if [[ ${8:-} == yes ]]; then site "$domain"; fi
+        preflight "$domain"
+    fi
+    for port in "${listeners[@]}"; do
+        fw_open "$port" node || fail "无法管理 UFW 规则 $port"
     done
     if [[ $domain == - ]]; then
         new_service "$five"
@@ -637,6 +670,9 @@ five_deploy() {
     socket_ready "$five" "${listeners[@]}" || fail '未确认五个端口均由新服务监听'
     systemctl enable "$five" && systemctl is-enabled --quiet "$five" ||
         fail '启用五协议开机自启失败，正在回退本次安装'
+    fw_save_mode || fail '无法保存 JC 防火墙管理模式'
+    fw_commit || fail '无法保存 JC 节点防火墙规则'
+    site_backup=''
     for i in "${!kinds[@]}"; do
         printf '已监听 %-8s %s%s%s\n' "${kinds[i]}" "$green" "${listeners[i]}" "$reset"
     done
@@ -743,6 +779,7 @@ change_five_port() {
     printf '%s\n' "${files[@]}" >"$backup/paths"
     for i in "${!files[@]}"; do private_put "$backup/$i" <"${files[i]}"; done
     port_paths=("${files[@]}")
+    fw_open "$new_port/$transport" node || fail "无法管理 UFW 规则 $new_port/$transport"
     port_backup=$backup
     private_put "$config" <"$scratch/port/config.json"
     restart_managed "$five" || fail '新端口启动或监听检查失败，正在回退'
@@ -750,8 +787,10 @@ change_five_port() {
         put_port_file "$file" <"$scratch/port/${file##*/}" || fail '更新客户端配置失败，正在回退'
     done
     port_backup=''
+    fw_commit || fail '节点端口已更新，无法提交 UFW 记录，将在下次操作时检查'
+    if [[ $fw_mode == smart ]]; then fw_prune "$old_port/$transport"; fi
     printf '%s 端口已从 %s 改为 %s/%s。备份位于 %s\n' "$kind" "$old_port" "$new_port" "$transport" "$backup"
-    echo '请放行新端口，从客户端重新导入受影响的节点并复测。'
+    echo '请核对云防火墙，从客户端重新导入受影响的节点并复测。'
     if [[ $kind == reality ]]; then
         echo '若订阅使用 REALITY 入口，请在「客户端与订阅」→「发布五协议单节点及聚合订阅」查看并更新订阅地址。'
     fi
@@ -986,6 +1025,8 @@ CADDY
             done
         done
         if $external; then
+            caddy_port_available 8443
+            fw_open 8443/tcp subscription || fail '无法管理 HTTPS 订阅的 UFW 规则'
             block=$(site_block "$domain")
             if grep -Eq '^[[:space:]]+bind[[:space:]]+127\.0\.0\.1[[:space:]]*$' <<<"$block"; then
                 awk -v marker="$domain:8443 {" '
@@ -995,8 +1036,10 @@ CADDY
                 ' "$caddyfile" >"$scratch/Caddyfile"
                 reload_site "$scratch/Caddyfile"
             fi
+            fw_commit || fail '无法保存 HTTPS 订阅防火墙规则'
             echo '请在云防火墙放行 TCP 8443，并从外网验证 HTTPS 订阅。'
         fi
+        site_backup=''
     fi
     printf '%s链接和二维码含节点凭据，请勿公开分享。%s\n' "$yellow" "$reset"
     while IFS= read -r link; do
@@ -1071,8 +1114,10 @@ JC
   packages [--no-caddy] [--restart-managed] [--version VERSION]
   uninstall
   site DOMAIN
+  firewall-status
+  firewall-cleanup
   status [DOMAIN]
-  five DOMAIN|- IP [--ports P1,P2,P3,P4,P5] [--uuid UUID] [--reality-target DOMAIN] [--reality-sni DOMAIN] [--preset-names HOST,HY2,TUIC,ANYTLS] [--template FILE]
+  five DOMAIN|- IP [--ports P1,P2,P3,P4,P5] [--uuid UUID] [--reality-target DOMAIN] [--reality-sni DOMAIN] [--preset-names HOST,HY2,TUIC,ANYTLS] [--template FILE] [--prepare-site yes]
   five-share [--publish|--v2rayn]
   five-port PROTOCOL PORT
   five-address IP|--ipv4|--ipv6
@@ -1100,10 +1145,21 @@ if [[ $command_name == five-summary ]]; then five_summary; exit; fi
 exec 9>/run/lock/sing-box-yg-plus.lock
 flock -n 9 || fail '另一个 JC 操作正在运行'
 scratch=$(mktemp -d)
+source "$(dirname -- "${BASH_SOURCE[0]}")/lib/firewall.sh"
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
+fw_load_mode
 case "$command_name" in
+    site|five|five-port|uninstall|firewall-cleanup) fw_recover ;;
+    five-share) if [[ ${1:-} == --publish ]]; then fw_recover; fi ;;
+esac
+case "$command_name" in
+    firewall-status) [[ $# == 0 ]] || fail '用法 firewall-status'; fw_report ;;
+    firewall-cleanup)
+        [[ $# == 0 ]] || fail '用法 firewall-cleanup'
+        [[ ! -e $(cfg "$five") ]] || fail '请先卸载 JC 节点'
+        fw_prune ;;
     pick-port) [[ $# -ge 1 ]] || fail '缺少传输协议'; pick_port "$@";;
     validate-install)
         [[ $# -ge 2 && $# -le 4 ]] || fail '缺少域名或公网节点地址'
@@ -1115,7 +1171,11 @@ case "$command_name" in
         fi ;;
     packages) packages "$@";;
     uninstall) [[ $# == 0 ]] || fail '用法 uninstall'; uninstall;;
-    site) [[ $# == 1 ]] || fail '用法 site DOMAIN'; site "$1";;
+    site)
+        [[ $# == 1 ]] || fail '用法 site DOMAIN'
+        site "$1"
+        fw_commit || fail '无法保存证书防火墙规则'
+        site_backup='';;
     status)
         [[ $# -le 1 ]] || fail '用法 status [DOMAIN]'
         systemctl --no-pager show "$five" caddy -p Id -p ActiveState -p UnitFileState -p ExecStart || true
@@ -1130,7 +1190,7 @@ case "$command_name" in
     five-port) [[ $# == 2 ]] || fail '用法 five-port PROTOCOL PORT'; change_five_port "$@";;
     five)
         [[ $# -ge 2 ]] || fail '缺少域名或公网节点地址'
-        host=$1; arg=$2; port_text=''; uuid_text=''; reality_target=''; preset_names=''; reality_sni=''
+        host=$1; arg=$2; port_text=''; uuid_text=''; reality_target=''; preset_names=''; reality_sni=''; prepare_site=''
         shift 2
         while (( $# )); do
             [[ $# -ge 2 ]] || fail "缺少 $1 的值"
@@ -1141,10 +1201,11 @@ case "$command_name" in
                 --reality-target) reality_target=$2;;
                 --preset-names) preset_names=$2;;
                 --reality-sni) reality_sni=$2;;
+                --prepare-site) [[ $2 == yes && $host != - ]] || fail '证书准备需要自有域名'; prepare_site=$2;;
                 *) fail "未知参数 $1";;
             esac
             shift 2
         done
-        five_deploy "$host" "$arg" "$port_text" "$uuid_text" "$reality_target" "$preset_names" "$reality_sni";;
+        five_deploy "$host" "$arg" "$port_text" "$uuid_text" "$reality_target" "$preset_names" "$reality_sni" "$prepare_site";;
     *) fail "未知命令 $command_name";;
 esac

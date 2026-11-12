@@ -12,10 +12,10 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - name: Check Bash scripts
         run: |
-          for script in bootstrap.sh duo.sh manager.sh; do
+          for script in bootstrap.sh duo.sh manager.sh lib/firewall.sh tests/firewall{,-ufw}.sh; do
             bash -n "$script"
           done
-          shellcheck --severity=error bootstrap.sh duo.sh manager.sh
+          shellcheck --severity=error bootstrap.sh duo.sh manager.sh lib/firewall.sh tests/firewall{,-ufw}.sh
           bash duo.sh --help
           if bash bootstrap.sh invalid; then
             echo 'Bootstrap accepted an invalid revision'
@@ -26,8 +26,8 @@ jobs:
       - name: Check client template and bootstrap hashes
         run: |
           jq -e 'type == "object" and (.outbounds | type == "array")' client-template.json
-          sed -nE '/^[0-9a-f]{64}  (manager\.sh|client-template\.json)$/p' bootstrap.sh > /tmp/jc.sha256
-          test "$(cut -c67- /tmp/jc.sha256 | sort)" = "$(printf '%s\n' client-template.json manager.sh)"
+          sed -nE '/^[0-9a-f]{64}  (manager\.sh|client-template\.json|lib\/firewall\.sh)$/p' bootstrap.sh > /tmp/jc.sha256
+          test "$(cut -c67- /tmp/jc.sha256 | sort)" = "$(printf '%s\n' client-template.json lib/firewall.sh manager.sh)"
           sha256sum --strict --check /tmp/jc.sha256
       - name: Simulate package update and rollback
         run: bash tests/upgrade.sh
@@ -35,3 +35,12 @@ jobs:
         run: bash tests/five-addresses.sh
       - name: Check certificate wait diagnostics
         run: bash tests/certificate-wait.sh
+      - name: Check Smart Firewall transactions
+        run: bash tests/firewall.sh
+      - name: Check real UFW rules in isolated namespaces
+        run: |
+          if ! command -v ufw >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y ufw
+          fi
+          sudo unshare --mount --net --propagation private bash tests/firewall-ufw.sh
