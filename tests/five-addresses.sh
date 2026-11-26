@@ -6,6 +6,7 @@ test_dir=$(mktemp -d)
 trap 'rm -rf -- "$test_dir"' EXIT
 source <(sed '/^command_name=/,$d' "$root/manager.sh")
 source "$root/lib/firewall.sh"
+source "$root/lib/ui.sh"
 fw_dir="$test_dir/firewall"
 fw_mode=manual
 template="$root/client-template.json"
@@ -114,6 +115,7 @@ base64 -d "$profiles/five/all.sub" | cmp - "$dir/profiles/links.txt"
 caddyfile="$test_dir/Caddyfile"
 cat >"$caddyfile" <<'CADDY'
 example.com:8443 {
+    bind 127.0.0.1
     handle_path /profiles/five/* {
         file_server
     }
@@ -127,6 +129,22 @@ grep -Eq 'VMess WS +TCP 28444' <<<"$summary"
 grep -Eq 'Hysteria 2 +UDP 8445' <<<"$summary"
 grep -F '距到期约' <<<"$summary" >/dev/null
 grep -F '已发布 · TCP 28443' <<<"$summary" >/dev/null
+certificate=$(five_certificate)
+grep -Eq '^subject=.*example\.com' <<<"$certificate"
+grep -Fq '本机证书将在 14 天内到期' <<<"$certificate"
+(
+    core=$(command -v bash)
+    before=$(sha256sum "$dir/config.json")
+    output=$(five_check)
+    grep -Fq '配置通过 sing-box check' <<<"$output"
+    systemctl() { printf '%s\n' "$*" >>"$test_dir/service-control"; }
+    socket_ready() { [[ $1 == "$five" && $# == 6 ]]; }
+    five_control restart
+    five_control stop
+    grep -Fxq "restart $five" "$test_dir/service-control"
+    grep -Fxq "stop $five" "$test_dir/service-control"
+    [[ $(sha256sum "$dir/config.json") == "$before" ]]
+)
 if grep -Eq '12345678-1234-1234-1234-123456789abc|test-private|vless://' <<<"$summary"; then
     echo 'Node overview exposed credentials' >&2
     exit 1
@@ -153,9 +171,17 @@ if (five_deploy example.com "$ipv4" 8443,8444,8445,8446,8447 12345678-1234-1234-
 fi
 
 grep -F '#VLESS-REALITY-New%20York' "$dir/profiles/links.txt" >/dev/null
+sed -i '/^    bind 127\.0\.0\.1$/d' "$caddyfile"
 summary=$(five_summary)
 grep -Eq 'REALITY +TCP 443 +SNI: www\.microsoft\.com' <<<"$summary"
-grep -F '已发布 · TCP 8443' <<<"$summary" >/dev/null
+grep -F '已发布 · TCP 8443（固定入口）' <<<"$summary" >/dev/null
+brief=$(five_summary --brief)
+grep -F '已发布（固定入口）' <<<"$brief" >/dev/null
+grep -F '距到期约' <<<"$brief" >/dev/null
+if grep -Eq 'TCP|SNI|28443' <<<"$brief"; then
+    echo 'The home summary displayed node details' >&2
+    exit 1
+fi
 rm -- "$profiles/five/all.sub"
 grep -F '未发布' <<<"$(five_summary)" >/dev/null
 
@@ -192,9 +218,18 @@ done
 grep -F "$dir/local-tls.crt" <<<"$output" >/dev/null
 
 links_before=$(sha256sum "$dir/profiles/links.txt" "$dir/profiles/all.json")
-cancelled=$(five_share --v2rayn <<<n)
-[[ $cancelled != *'QR '* ]]
-output=$(five_share --v2rayn <<<y)
+for value in n N; do
+    cancelled=$(five_share --v2rayn <<<"$value")
+    [[ $cancelled != *'QR '* ]]
+done
+for value in y Y ''; do
+    output=$(five_share --v2rayn <<<"$value" 2>"$test_dir/confirm-prompt")
+    [[ $(grep -c '^QR ' <<<"$output") == 5 ]]
+    grep -Fq '[Y/N]（回车默认 Y）' "$test_dir/confirm-prompt"
+done
+jc_confirm '测试无效输入后确认？' <<< $'invalid\ny' 2>"$test_dir/confirm-prompt"
+grep -Fq '请输入 Y 或 N。' "$test_dir/confirm-prompt"
+if jc_confirm '测试输入已关闭？' </dev/null 2>/dev/null; then exit 1; fi
 fingerprint=$(openssl x509 -in "$dir/local-tls.crt" -outform DER | sha256sum | cut -d' ' -f1)
 [[ $(grep -c '^QR ' <<<"$output") == 5 ]]
 grep -Eq "^hysteria2://.*&pinSHA256=$fingerprint#" <<<"$output"
@@ -215,7 +250,7 @@ done
     option() { :; }
     choices=(1)
     choose() {
-        [[ $1 == 9 ]]
+        [[ $# == 0 ]]
         selection=${choices[0]}
         choices=("${choices[@]:1}")
     }
