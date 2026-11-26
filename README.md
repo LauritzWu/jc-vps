@@ -4,7 +4,7 @@
 
 ## 一键安装 v1.5.1
 
-在 VPS 的 root Bash 会话中运行。入口需要 curl。安装脚本、管理脚本、客户端模板和后续的 `singdeck` 命令均使用同一提交。
+在 VPS 的 root Bash 会话中运行。入口需要 curl。安装脚本、管理脚本、客户端模板和管理入口均使用同一提交。v1.5.1 安装后用 `singdeck` 打开菜单。
 
 ```bash
 revision=a89f65ab21551480d88d91145154544d1cd3a324
@@ -16,15 +16,15 @@ s=$(curl -4fsSL -m 25 "https://raw.githubusercontent.com/LauritzWu/singdeck/$rev
 
 ### 本地管理与终端菜单
 
-安装后运行 `singdeck` 打开菜单。
+SingDeck 原名 JC。下文的 `sd` 用法适用于下一版。按上方命令安装 v1.5.1 后，请在下文示例中使用 `singdeck`。升级后，已安装的 `singdeck`、`jc` 和 `JC` 入口仍可使用。
 
-安装入口会校验脚本、模板和模块，再将它们安装到 `/usr/local/lib/jc`，之后 `singdeck` 从本地打开菜单，查看状态和日志时无需访问 GitHub。仍可在「系统工具」手动补齐工具依赖。从第二个本地版本起，运行 `singdeck --rollback` 可切回上一个已安装的管理入口。
+安装入口会校验脚本、模板和模块，再将它们安装到 `/usr/local/lib/jc`，之后 `sd` 从本地打开菜单，查看状态和日志时无需访问 GitHub。仍可在「系统工具」手动补齐工具依赖。从第二个本地版本起，运行 `sd --rollback` 可切回上一个已安装的管理入口。
 
 SingDeck 首页使用暖灰正文、陶土色强调和德牧侧脸。首页采用单列菜单，安装前 `1` 打开向导，安装后 `1` 查看部署概况。`2` 查看 sing-box 或 Caddy 日志，`8` 查本机 TLS 证书，`9` 校验服务端配置。可从「服务管理」重启或停止服务。
 
 每个普通编号菜单回车选择 `1`。确认提示统一显示 `[Y/N]`，支持大小写，回车确认。完整卸载位于「系统工具 → 6 完整卸载」，删除节点配置前的独立确认回车取消。
 
-终端字体和背景可在本地 SSH 客户端设置。可使用 Sarasa Term SC 13 pt 常规字重。深色背景可用 `#262520`，浅色背景可用 `#F5F1E8`。使用浅色背景时运行 `JC_THEME=light singdeck`，纯文字标题用 `JC_BANNER=plain singdeck`，关闭着色用 `NO_COLOR=1 singdeck`。
+终端字体和背景可在本地 SSH 客户端设置。可使用 Sarasa Term SC 13 pt 常规字重。深色背景可用 `#262520`，浅色背景可用 `#F5F1E8`。使用浅色背景时运行 `JC_THEME=light sd`，纯文字标题用 `JC_BANNER=plain sd`，关闭着色用 `NO_COLOR=1 sd`。
 
 **v1.5.0 实测**覆盖 Ubuntu 24.04 LTS 的公网 IPv4 固定订阅迁移。迁移时旧 REALITY 入口与固定 TCP 8443 入口均通过 HTTPS 鉴权。更换 REALITY 端口后，固定入口的 JSON 和 Base64 订阅均返回新端口，Sub-Store 刷新和 Windows 客户端连通性通过。公网 IPv6 节点换地址和手机端订阅刷新留待后续验证。
 
@@ -34,7 +34,7 @@ SingDeck 首页使用暖灰正文、陶土色强调和德牧侧脸。首页采�
 
 在「3 服务状态」可查看本机监听和最近 50 条运行日志。服务器地区通过 ipwho.is 按 VPS 公网出口 IP 查询并缓存 24 小时。在「系统工具 → 手动覆盖服务器地区」可手动设置，已保存的地区优先使用。
 
-首次运行自动安装 `singdeck`、`jc` 和 `JC` 快捷命令，并通过 APT 补齐缺失的 jq、qrencode、OpenSSL、iproute2 和 flock。已有 `duo` 的用户可运行一次 `duo`，新版会自动安装 `jc`。主菜单选「一键安装 sing-box」，按顺序选择内核、输入域名和公网节点地址（IPv4 或 IPv6）、分配端口、生成或填写 UUID，最后确认安装。
+首次运行会安装管理命令，并通过 APT 补齐缺失的 jq、qrencode、OpenSSL、iproute2 和 flock。主菜单选「一键安装 sing-box」，按顺序选择内核、输入域名和公网节点地址（IPv4 或 IPv6）、分配端口、生成或填写 UUID，最后确认安装。
 
 ## 卸载和重装
 
@@ -69,7 +69,7 @@ SingDeck 首页使用暖灰正文、陶土色强调和德牧侧脸。首页采�
 
 ## 连不上时怎么查
 
-1. 运行 `singdeck`，选「服务状态」。检查五协议服务是否运行。再运行 `ss -lntup`，核对安装向导列出的端口是否在本机监听。
+1. 运行 `sd`，选「服务状态」。检查五协议服务是否运行。再运行 `ss -lntup`，核对安装向导列出的端口是否在本机监听。
 2. 若本机已监听，从云服务商面板核对入站规则。REALITY、VMess 和 AnyTLS 用 TCP，Hysteria 2 和 TUIC 用 UDP。按安装向导显示的端口逐个检查。
 3. 若证书签发失败，检查域名 A 记录是否指向 VPS，公网 TCP 80 是否开放。运行 `journalctl -u caddy -n 50 --no-pager` 查看原因。若域名也有 AAAA 记录，确认对应 IPv6 的 TCP 80 同样可达。
 4. 若订阅下载失败，用浏览器打开菜单生成的 HTTPS 地址。匿名访问应要求认证。输入正确凭据后应能下载配置。分享排障信息前，删去节点链接、订阅密码和私钥。
