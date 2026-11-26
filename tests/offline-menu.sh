@@ -27,18 +27,18 @@ run_menu 96 0 >"$test_dir/wide"
 run_menu 48 0 >"$test_dir/narrow"
 grep -Fq 'JC · VPS 管理' "$test_dir/wide"
 grep -Eq '3  服务状态 +4  服务管理' "$test_dir/wide"
-grep -Eq '3  服务状态[[:space:]]* "$test_dir/narrow"
-grep -Eq '4  服务管理[[:space:]]* "$test_dir/narrow"
+grep -Eq '3  服务状态[[:space:]]*$' "$test_dir/narrow"
+grep -Eq '4  服务管理[[:space:]]*$' "$test_dir/narrow"
 grep -Fq '1  一键安装 sing-box' "$test_dir/narrow"
-if grep -Eq 'GERMAN SHEPHERD|完整卸载|IPv6' "$test_dir/wide" || grep -Fq \033[' "$test_dir/wide"; then
+if grep -Eq 'GERMAN SHEPHERD|完整卸载|IPv6' "$test_dir/wide" || grep -Fq $'\033[' "$test_dir/wide"; then
     exit 1
 fi
 
-run_menu 96 2\n0\n0' >"$test_dir/tools"
+run_menu 96 $'2\n0\n0' >"$test_dir/tools"
 grep -Fq '6  完整卸载 sing-box 和 JC' "$test_dir/tools"
 
 NO_COLOR='' TERM=xterm-256color COLORTERM=truecolor JC_THEME=light JC_BANNER=full run_menu 96 0 >"$test_dir/light"
-grep -Fq \033[1;38;2;128;85;46mJC' "$test_dir/light"
+grep -Fq $'\033[1;38;2;128;85;46mJC' "$test_dir/light"
 grep -Fq 'GERMAN SHEPHERD EDITION' "$test_dir/light"
 [[ ! -e $JC_NETWORK_LOG ]]
 
