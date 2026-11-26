@@ -47,14 +47,14 @@ installed=false
 ln -sT -- jc "$root/singdeck"
 ln -sT -- jc "$root/JC"
 install_shortcut
-[[ $(readlink -- "$root/sdeck") == jc ]]
-[[ $("$root/sdeck") == two && $("$root/singdeck") == two && $("$root/JC") == two ]]
+[[ $(readlink -- "$root/sd") == jc ]]
+[[ $("$root/sd") == two && $("$root/singdeck") == two && $("$root/JC") == two ]]
 install_shortcut
 
-rm -- "$root/sdeck"
-printf '%s\n' 'unrelated command' >"$root/sdeck"
+rm -- "$root/sd"
+printf '%s\n' 'unrelated command' >"$root/sd"
 if install_shortcut; then exit 1; fi
-grep -qxF 'unrelated command' "$root/sdeck"
+grep -qxF 'unrelated command' "$root/sd"
 [[ $("$jc_launcher") == two ]]
 
 echo 'Local launcher migration, failed upgrade, rollback and SingDeck shortcuts passed'
