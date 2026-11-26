@@ -51,9 +51,14 @@ install_shortcut
 [[ $("$root/sd") == two && $("$root/singdeck") == two && $("$root/JC") == two ]]
 install_shortcut
 
-rm -- "$root/sd"
+source <(sed -n '/^remove_sd_shortcut() {$/,/^}$/p' bootstrap.sh)
+remove_sd_shortcut
+[[ ! -e $root/sd && ! -L $root/sd ]]
+[[ $("$jc_launcher") == two && $("$root/singdeck") == two && $("$root/JC") == two ]]
+if remove_sd_shortcut; then exit 1; fi
 printf '%s\n' 'unrelated command' >"$root/sd"
 if install_shortcut; then exit 1; fi
+if remove_sd_shortcut; then exit 1; fi
 grep -qxF 'unrelated command' "$root/sd"
 [[ $("$jc_launcher") == two ]]
 

@@ -531,9 +531,16 @@ init_tools() {
     install_shortcut || printf '%s\n' '快捷命令安装未全部完成，仍可继续使用本次菜单。' >&2
 }
 
+remove_sd_shortcut() {
+    local alias_path="${jc_launcher%/*}/sd"
+    if [[ ! -L $alias_path || $(readlink -- "$alias_path") != jc ]]; then
+        echo '未发现由 SingDeck 安装的 sd 快捷命令。'
+        return 1
+    fi
+    rm -- "$alias_path"
+}
+
 shortcut_menu() {
-    local target=$jc_launcher alias_path
-    local shortcuts=()
     while true; do
         heading '管理 SingDeck 快捷命令'
         option 1 '安装 sd 快捷命令'
@@ -543,27 +550,14 @@ shortcut_menu() {
             0) return ;;
             1) install_shortcut || true ;;
             2)
-                shortcuts=()
-                for alias_path in "${target%/*}/sd" "${target%/*}/singdeck" "${target%/*}/JC"; do
-                    if [[ -L $alias_path && $(readlink -- "$alias_path") == jc ]]; then
-                        shortcuts+=("$alias_path")
-                    fi
-                done
-                if [[ -f $target && ! -L $target ]] &&
-                    grep -qxF -e '# Managed by JC' -e '# Managed by Lauritz Duo' "$target"; then
-                    shortcuts+=("$target")
-                fi
-                if (( ! ${#shortcuts[@]} )); then
-                    echo '未发现由 SingDeck 安装的快捷命令。'
-                    continue
-                fi
                 if jc_confirm '卸载 sd 快捷命令？' </dev/tty; then
-                    rm -f -- "${shortcuts[@]}" && echo '快捷命令已卸载。'
+                    remove_sd_shortcut && echo 'sd 快捷命令已卸载。'
                 fi ;;
             *) echo '无效选项。' ;;
         esac
     done
 }
+
 
 
 region_file="${XDG_CONFIG_HOME:-$HOME/.config}/jc/region"

@@ -8,15 +8,15 @@
 
 ```bash
 revision=a89f65ab21551480d88d91145154544d1cd3a324
-s=$(curl -4fsSL -m 25 "https://raw.githubusercontent.com/LauritzWu/jc-vps/$revision/bootstrap.sh") &&
+s=$(curl -4fsSL -m 25 "https://raw.githubusercontent.com/LauritzWu/singdeck/$revision/bootstrap.sh") &&
   bash -c "$s" -- "$revision"
 ```
 
-新部署可选「1 一键安装 sing-box」或直接回车。已有部署运行上述命令即可更新管理入口，节点无需重装。详见 [v1.5.1 发布说明](https://github.com/LauritzWu/jc-vps/releases/tag/v1.5.1)。
+新部署可选「1 一键安装 sing-box」或直接回车。已有部署运行上述命令即可更新管理入口，节点无需重装。详见 [v1.5.1 发布说明](https://github.com/LauritzWu/singdeck/releases/tag/v1.5.1)。
 
 ### 本地管理与终端菜单
 
-SingDeck 原名 JC。安装后可用 `sd` 打开菜单，已有的 `jc` 和 `JC` 命令也可以继续使用。
+SingDeck 原名 JC。下文的 `sd` 用法适用于下一版。按上方命令安装 v1.5.1 后，请在下文示例中使用 `singdeck`。升级后，已安装的 `singdeck`、`jc` 和 `JC` 入口仍可使用。
 
 安装入口会校验脚本、模板和模块，再将它们安装到 `/usr/local/lib/jc`，之后 `sd` 从本地打开菜单，查看状态和日志时无需访问 GitHub。仍可在「系统工具」手动补齐工具依赖。从第二个本地版本起，运行 `sd --rollback` 可切回上一个已安装的管理入口。
 
@@ -30,7 +30,7 @@ SingDeck 首页使用暖灰正文、陶土色强调和德牧侧脸。首页采�
 
 **v1.4.0 实测**覆盖 Ubuntu 24.04 LTS 的公网 IPv4 安装与卸载、SSH 重连、UFW 规则归属、Fail2ban 封禁保留、五协议代理、公信证书签发、HTTPS 订阅认证和 HY2 换端口及回滚。公网 IPv6、证书自然续期及使用外部 REALITY 握手目标的 HTTPS 订阅仍待本版实测。
 
-**历史版本验收范围**为 Ubuntu 24.04 LTS 和 Debian 13，均为 x86_64、IPv4。五个协议均通过公网连通测试，两套系统也通过了公信证书签发、订阅认证、重启恢复、内核切换和失败回退，以及卸载重装。五协议也已通过公网 IPv6 连通测试，IPv6 订阅已在隔离环境验收，分享链接已通过 v2rayN 导入检查。详见 [v1.1.0 发布说明](https://github.com/LauritzWu/jc-vps/releases/tag/v1.1.0)。
+**历史版本验收范围**为 Ubuntu 24.04 LTS 和 Debian 13，均为 x86_64、IPv4。五个协议均通过公网连通测试，两套系统也通过了公信证书签发、订阅认证、重启恢复、内核切换和失败回退，以及卸载重装。五协议也已通过公网 IPv6 连通测试，IPv6 订阅已在隔离环境验收，分享链接已通过 v2rayN 导入检查。详见 [v1.1.0 发布说明](https://github.com/LauritzWu/singdeck/releases/tag/v1.1.0)。
 
 在「3 服务状态」可查看本机监听和最近 50 条运行日志。服务器地区通过 ipwho.is 按 VPS 公网出口 IP 查询并缓存 24 小时。在「系统工具 → 手动覆盖服务器地区」可手动设置，已保存的地区优先使用。
 
