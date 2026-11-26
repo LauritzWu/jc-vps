@@ -26,7 +26,7 @@ fetch() { curl -4 -fsSL --retry 2 --connect-timeout 8 --max-time 25 "$@"; }
 put() {
     local dest=$1 mode=$2 group=$3 temp
     temp=$(mktemp "$(dirname -- "$dest")/.duo.XXXXXX")
-    if cat >"$temp" && chmod "$mode" "$temp" && chgrp "$group" "$temp" && mv -fT -- "$temp" "$dest"; then return; fi
+    if cat >"$temp" && chmod "$mode" "$temp" && chgrp "$group" "$temp" && mv -fT -- "$temp" "$dest"; then return 0; fi
     rm -f -- "$temp"
     return 1
 }

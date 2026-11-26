@@ -49,7 +49,7 @@ if ! $installed; then
     printf '%s\n' "$revision" >"$dir/revision"
 fi
 (cd "$dir" && sha256sum --status --strict -c <<'SHA256'
-9890e0ce6abd1494ae94d74e7c265e2aca51231e67905e7e2667969729484995  manager.sh
+ab34efa972415de6789b0b3394a9655e908ac201a829dbd20c15d6f61e642f04  manager.sh
 d96d8e1440c7b53ef47625820c77fe58c95a4ff0cef1f989d68c53ff099a7d7b  client-template.json
 6dc765ad0e22eeeeed7d8edda757b79ab6cd67a4756970762a2ccb6c1f7fab42  lib/firewall.sh
 d1c7f57d69da15af90ef773dbcab1b3dd2fb89f70c42675a89d9c73575a3ea04  lib/launcher.sh

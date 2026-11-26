@@ -37,11 +37,16 @@ jobs:
         run: bash tests/fixed-subscription.sh
       - name: Check fixed subscription with real Caddy and HTTPS
         run: |
-          if ! command -v caddy >/dev/null || ! getent group caddy >/dev/null; then
+          caddy_path=$(command -v caddy || true)
+          if [[ -z $caddy_path ]]; then
             sudo apt-get update
-            sudo apt-get install -y caddy
+            package_dir=$(mktemp -d)
+            trap 'rm -rf -- "$package_dir"' EXIT
+            (cd "$package_dir" && apt-get download caddy)
+            dpkg-deb -x "$package_dir"/caddy_*.deb "$package_dir"
+            caddy_path="$package_dir/usr/bin/caddy"
           fi
-          sudo unshare --net bash tests/fixed-subscription-caddy.sh
+          sudo unshare --net env PATH="$(dirname "$caddy_path"):$PATH" bash tests/fixed-subscription-caddy.sh
       - name: Simulate package update and rollback
         run: bash tests/upgrade.sh
       - name: Check IPv4 and IPv6 node generation

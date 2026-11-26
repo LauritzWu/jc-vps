@@ -69,9 +69,17 @@ show_qr() { print_link "$1"; }
 fw_open() { [[ $1 == 8443/tcp && $2 == subscription ]]; }
 fw_commit() { :; }
 systemctl() {
-    [[ $* == 'reload caddy' ]] || return 1
+    [[ $# == 2 && $1 == reload && $2 == caddy ]] || return 1
     caddy reload --config "$caddyfile" --adapter caddyfile
 }
+# The fixture runs as root. An extracted Caddy package has no installed
+# service account, so its published files use group root in this case.
+if ! getent group caddy >/dev/null; then
+    chgrp() {
+        if [[ $1 == caddy ]]; then shift; command chgrp root "$@"
+        else command chgrp "$@"; fi
+    }
+fi
 
 request() {
     local address=$1 path=$2
@@ -126,6 +134,7 @@ cmp "$test_dir/loopback.Caddyfile" "$caddyfile"
 auth_checks "$loopback"
 if request "$secondary" / >/dev/null 2>&1; then
     echo 'The fixed listener remained reachable after rollback' >&2
+    cat "$test_dir/rollback" >&2
     exit 1
 fi
 mkdir -p "$scratch"
