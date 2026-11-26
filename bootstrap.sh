@@ -380,25 +380,25 @@ quick_install() {
 
 accent='' ink='' muted='' sketch='' green='' yellow='' red='' reset=''
 if [[ -t 1 && "${TERM:-dumb}" != dumb && -z "${NO_COLOR:-}" ]]; then
-    accent=$'\033[1;33m'; ink=$'\033[37m'; muted=$ink; sketch=$'\033[33m'
+    accent=$'\033[33m'; ink=$'\033[37m'; muted=$ink; sketch=$'\033[33m'
     green=$'\033[32m'; yellow=$'\033[33m'; red=$'\033[31m'; reset=$'\033[0m'
     if [[ ${COLORTERM:-} == truecolor || ${COLORTERM:-} == 24bit ]]; then
         if [[ ${JC_THEME:-dark} == light ]]; then
-            accent=$'\033[1;38;2;128;85;46m'; ink=$'\033[38;2;52;42;33m'; muted=$'\033[38;2;101;90;80m'
-            sketch=$'\033[38;2;125;88;57m'; green=$'\033[38;2;58;97;64m'
-            yellow=$'\033[38;2;132;85;19m'; red=$'\033[38;2;152;63;55m'
+            accent=$'\033[38;2;118;91;62m'; ink=$'\033[38;2;56;52;45m'; muted=$'\033[38;2;109;103;93m'
+            sketch=$'\033[38;2;135;109;81m'; green=$'\033[38;2;70;100;74m'
+            yellow=$'\033[38;2;130;92;54m'; red=$'\033[38;2;148;71;64m'
         else
-            accent=$'\033[1;38;2;232;192;141m'; ink=$'\033[38;2;237;226;209m'; muted=$'\033[38;2;182;173;160m'
-            sketch=$'\033[38;2;215;183;143m'; green=$'\033[38;2;169;199;160m'
-            yellow=$'\033[38;2;233;190;117m'; red=$'\033[38;2;236;163;152m'
+            accent=$'\033[38;2;202;184;158m'; ink=$'\033[38;2;222;218;210m'; muted=$'\033[38;2;168;164;154m'
+            sketch=$'\033[38;2;174;150;122m'; green=$'\033[38;2;148;172;152m'
+            yellow=$'\033[38;2;210;174;118m'; red=$'\033[38;2;216;154;146m'
         fi
     elif [[ $TERM == *256color* ]]; then
         if [[ ${JC_THEME:-dark} == light ]]; then
-            accent=$'\033[1;38;5;94m'; ink=$'\033[38;5;235m'; muted=$'\033[38;5;240m'
+            accent=$'\033[38;5;94m'; ink=$'\033[38;5;235m'; muted=$'\033[38;5;240m'
             sketch=$'\033[38;5;94m'; green=$'\033[38;5;22m'; yellow=$'\033[38;5;94m'; red=$'\033[38;5;124m'
         else
-            accent=$'\033[1;38;5;223m'; ink=$'\033[38;5;255m'; muted=$'\033[38;5;250m'
-            sketch=$'\033[38;5;180m'; green=$'\033[38;5;150m'; yellow=$'\033[38;5;222m'; red=$'\033[38;5;174m'
+            accent=$'\033[38;5;180m'; ink=$'\033[38;5;253m'; muted=$'\033[38;5;247m'
+            sketch=$'\033[38;5;137m'; green=$'\033[38;5;108m'; yellow=$'\033[38;5;179m'; red=$'\033[38;5;174m'
         fi
     elif [[ ${JC_THEME:-dark} == light ]]; then
         ink=$'\033[30m'
@@ -406,10 +406,10 @@ if [[ -t 1 && "${TERM:-dumb}" != dumb && -z "${NO_COLOR:-}" ]]; then
     fi
 fi
 
-heading() { printf '\n%s%s%s\n' "$accent" "$1" "$reset"; }
+heading() { printf '\n%s%s%s\n' "$ink" "$1" "$reset"; }
 option() { printf ' %s%s%s  %s%s%s\n' "$accent" "$1" "$reset" "${3:-$ink}" "$2" "$reset"; }
 choose() {
-    read -r -p "${yellow}请选择 [默认 $1，0 返回]：$reset" selection </dev/tty || exit 1
+    read -r -p "${muted}请选择 [默认 $1，0 返回]：$reset" selection </dev/tty || exit 1
     selection=${selection:-$1}
 }
 
@@ -657,7 +657,7 @@ vps_summary() {
 
     if [[ $mode == brief ]]; then
         printf ' %s%s%s\n' "$muted" "${os:-系统未知}" "$reset"
-        printf ' %ssing-box     %s%s%s%s%s\n' "$ink" "${state_color:-$ink}" "$state" "$muted" "$autostart" "$reset"
+        printf ' %ssing-box     %s%s%s%s%s\n' "$muted" "${state_color:-$ink}" "$state" "$muted" "$autostart" "$reset"
         return
     fi
 
@@ -855,11 +855,16 @@ SHEPHERD
 }
 
 home_overview() {
-    local health line
+    local health line label
     vps_summary brief
     if [[ -s /etc/$five_service/config.json ]] && health=$(duo five-summary --brief); then
         while IFS= read -r line; do
-            printf '%s%s%s\n' "$ink" "$line" "$reset"
+            label=${line%%  *}
+            if [[ $label == "$line" ]]; then
+                printf '%s%s%s\n' "$ink" "$line" "$reset"
+            else
+                printf '%s%s%s%s%s\n' "$muted" "$label" "$ink" "${line#"$label"}" "$reset"
+            fi
         done <<<"$health"
     fi
 }
@@ -886,13 +891,13 @@ home_banner() {
     mapfile -t portrait < <(home_portrait "$style")
     if (( width >= 66 )); then
         title=(
-            "$accent  █████   ██████$reset"
-            "$accent     ██  ██$reset"
-            "$accent     ██  ██$reset"
-            "$accent ██  ██  ██$reset"
-            "$accent  ████    ██████$reset"
+            "$accent  ▀▀▀▀▀▌    ▄▀▀▀▀▀▄$reset"
+            "$accent       ▌   ▐$reset"
+            "$accent       ▌   ▐$reset"
+            "$accent  ▖    ▌   ▐$reset"
+            "$accent   ▀▄▄▀     ▀▄▄▄▄▄▀$reset"
             ''
-            "$accent  JC · VPS 管理$reset"
+            "$ink  VPS 管理$reset"
             "$muted  GERMAN SHEPHERD EDITION$reset"
         )
     elif (( width >= 43 )); then
@@ -900,7 +905,7 @@ home_banner() {
     fi
     if (( width >= 78 )); then
         mapfile -t overview < <(home_overview)
-        title+=('' "$accent"'  运行概况'"$reset" "${overview[@]}")
+        title+=('' "$ink"'  运行概况'"$reset" "${overview[@]}")
     fi
 
     start=$(( (${#portrait[@]} - ${#title[@]}) / 2 ))
@@ -956,11 +961,11 @@ while true; do
     home_menu "$width" "$deployed"
     if $deployed; then
         while true; do
-            read -r -p "${accent}输入菜单编号（0 退出）：$reset" selection </dev/tty || exit 1
+            read -r -p "${muted}输入菜单编号（0 退出）：$reset" selection </dev/tty || exit 1
             [[ -n $selection ]] && break
         done
     else
-        read -r -p "${accent}请选择 [回车默认 1 安装，0 退出]：$reset" selection </dev/tty || exit 1
+        read -r -p "${muted}请选择 [回车默认 1 安装，0 退出]：$reset" selection </dev/tty || exit 1
         selection=${selection:-1}
     fi
     case "$selection" in

@@ -24,7 +24,7 @@ s=$(curl -4fsSL -m 25 "https://raw.githubusercontent.com/LauritzWu/jc-vps/$revis
   bash -c "$s" -- "$revision"
 ```
 
-开发版首页默认显示德牧侧脸素描和 JC 标志，旁边显示运行状态、证书和订阅。空间不足时概况会换到头像下方，较窄终端改用小头像和单列菜单。在「服务状态 → 查看服务状态和本机监听」可查看地区、IP 和五协议端口。可用 `JC_THEME=light jc` 切换浅色终端配色，`JC_BANNER=plain jc` 用文字标题替代素描，`NO_COLOR=1 jc` 关闭着色。完整卸载位于「系统工具 → 6 完整卸载」。
+开发版首页默认显示德牧侧脸素描和 JC 标志，旁边显示运行状态、证书和订阅。空间不足时概况会换到头像下方，较窄终端改用小头像和单列菜单。在「服务状态 → 查看服务状态和本机监听」可查看地区、IP 和五协议端口。首页使用暖灰正文和低饱和沙金，终端本地可用等宽中英文字体获得更统一的显示，例如 Sarasa Term SC。可用 `JC_THEME=light jc` 切换浅色终端配色，`JC_BANNER=plain jc` 用文字标题替代素描，`NO_COLOR=1 jc` 关闭着色。完整卸载位于「系统工具 → 6 完整卸载」。
 
 **v1.4.0 实测**覆盖 Ubuntu 24.04 LTS 的公网 IPv4 安装与卸载、SSH 重连、UFW 规则归属、Fail2ban 封禁保留、五协议代理、公信证书签发、HTTPS 订阅认证和 HY2 换端口及回滚。公网 IPv6、证书自然续期及使用外部 REALITY 握手目标的 HTTPS 订阅仍待本版实测。
 

@@ -25,7 +25,8 @@ run_menu() {
 
 run_menu 96 0 >"$test_dir/wide"
 run_menu 48 0 >"$test_dir/narrow"
-grep -Fq 'JC · VPS 管理' "$test_dir/wide"
+grep -Fq 'VPS 管理' "$test_dir/wide"
+grep -Fq '▀▀▀▀▀▌' "$test_dir/wide"
 grep -Eq '3  服务状态 +4  服务管理' "$test_dir/wide"
 grep -Eq '3  服务状态[[:space:]]*$' "$test_dir/narrow"
 grep -Eq '4  服务管理[[:space:]]*$' "$test_dir/narrow"
@@ -41,11 +42,17 @@ run_menu 96 $'2\n0\n0' >"$test_dir/tools"
 grep -Fq '6  完整卸载 sing-box 和 JC' "$test_dir/tools"
 
 NO_COLOR='' TERM=xterm-256color COLORTERM=truecolor JC_THEME=light run_menu 96 0 >"$test_dir/light"
-grep -Fq $'\033[1;38;2;128;85;46m' "$test_dir/light"
+grep -Fq $'\033[38;2;118;91;62m' "$test_dir/light"
 grep -Fq 'GERMAN SHEPHERD EDITION' "$test_dir/light"
 
 NO_COLOR='' TERM=xterm-256color COLORTERM='' JC_THEME=dark run_menu 48 0 >"$test_dir/colored"
-grep -Fq $'\033[38;5;255m服务状态' "$test_dir/colored"
+grep -Fq $'\033[38;5;253m服务状态' "$test_dir/colored"
+grep -Fq $'\033[38;5;180m3' "$test_dir/colored"
+grep -Fq $'\033[38;5;137m' "$test_dir/colored"
+
+NO_COLOR='' TERM=xterm-256color COLORTERM=truecolor JC_THEME=dark run_menu 96 0 >"$test_dir/dark"
+grep -Fq $'\033[38;2;202;184;158m' "$test_dir/dark"
+grep -Fq $'\033[38;2;174;150;122m' "$test_dir/dark"
 
 JC_BANNER=plain run_menu 96 0 >"$test_dir/plain"
 grep -Fq 'JC · VPS 管理' "$test_dir/plain"
