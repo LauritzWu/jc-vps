@@ -111,6 +111,25 @@ five_share --publish <<<"$password"$'\n'"$password" >"$test_dir/legacy"
 auth_checks "$loopback"
 grep -Fq "https://$domain:4443$prefix/all.sub" "$test_dir/legacy"
 
+# Force a post-reload failure to exercise the reverse listener migration.
+cp "$caddyfile" "$test_dir/loopback.Caddyfile"
+if (
+    trap cleanup EXIT
+    fw_commit() { return 1; }
+    fw_rollback() { :; }
+    five_share --publish --fixed
+) >"$test_dir/rollback"; then
+    echo 'An unsuccessful firewall commit did not fail the publication' >&2
+    exit 1
+fi
+cmp "$test_dir/loopback.Caddyfile" "$caddyfile"
+auth_checks "$loopback"
+if request "$secondary" / >/dev/null 2>&1; then
+    echo 'The fixed listener remained reachable after rollback' >&2
+    exit 1
+fi
+mkdir -p "$scratch"
+
 five_share --publish --fixed >"$test_dir/fixed"
 grep -Fq "https://$domain:8443$prefix/all.sub" "$test_dir/fixed"
 grep -Fq "https://$domain:4443$prefix/all.sub" "$test_dir/fixed"

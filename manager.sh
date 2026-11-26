@@ -79,12 +79,56 @@ find_cert() {
     cert=${matches[0]}
     openssl x509 -in "$cert" -checkend 0 -noout >/dev/null
 }
+caddy_quic_listening() {
+    local address=$1
+    ss -H -lnup '( sport = :8443 )' |
+        awk -v address="$address" '
+            /"caddy"/ && ($4 == address ||
+                (address == ":8443" && $4 ~ /^(\*|0\.0\.0\.0|\[::\]):8443$/)) {
+                found = 1
+            }
+            END {exit !found}
+        '
+}
+
+release_caddy_quic() {
+    local source=$1 address=$2 attempt
+    if ! caddy_quic_listening "$address"; then return 0; fi
+
+    # Caddy starts new sockets before closing old ones. Keep TCP and the
+    # other site's listeners active while releasing this UDP socket.
+    caddy adapt --config "$source" --adapter caddyfile >"$scratch/caddy-current.json" || return 1
+    jq -e --arg address "$address" '
+        .apps.http.servers |= (
+            to_entries |
+            if (map(select(.value.listen == [$address])) | length) != 1 then
+                error("Unable to identify an isolated subscription listener")
+            else
+                map(if .value.listen == [$address] then
+                    .value.protocols |= ((. // ["h1", "h2", "h3"]) | map(select(. != "h3")))
+                else . end) | from_entries
+            end
+        )
+    ' "$scratch/caddy-current.json" >"$scratch/caddy-without-quic.json" || return 1
+    caddy reload --config "$scratch/caddy-without-quic.json" || return 1
+    for ((attempt=0; attempt<40; attempt++)); do
+        if ! caddy_quic_listening "$address"; then return 0; fi
+        sleep 0.25
+    done
+    return 1
+}
+
 reload_site() {
     local candidate=$1 backup
     caddy validate --config "$candidate" --adapter caddyfile
     backup="$caddyfile.duo.$(date +%s%N).bak"
     private_put "$backup" <"$caddyfile"
     if [[ -z $site_backup ]]; then site_backup=$backup; fi
+    if [[ ${2:-} == fixed-subscription ]]; then
+        site_bind_migration=true
+        release_caddy_quic "$backup" 127.0.0.1:8443 ||
+            fail '无法释放回环 HTTP/3 监听，正在恢复原 Caddy 配置'
+    fi
     put "$caddyfile" 644 root <"$candidate"
     systemctl reload caddy || fail 'Caddy 重载失败，正在恢复原配置'
 }
@@ -360,10 +404,14 @@ upgrade_backup='' upgrade_running=()
 port_backup='' port_paths=()
 address_backup='' address_paths=()
 site_backup=''
+site_bind_migration=false
 cleanup() {
     local code=$? name recovered=true
     if (( code != 0 )); then
         if [[ -n $site_backup ]]; then
+            if $site_bind_migration && ! release_caddy_quic "$caddyfile" :8443; then
+                printf '无法释放固定入口的 HTTP/3 监听，正在尝试恢复原 Caddy 配置。\n' >&2
+            fi
             if ! put "$caddyfile" 644 root <"$site_backup" || ! systemctl reload caddy; then
                 printf 'Caddy 恢复待重试，备份位于 %s。\n' "$site_backup" >&2
             fi
@@ -479,7 +527,7 @@ enable_fixed_subscription() {
           inside && /^[[:space:]]+bind[[:space:]]+127\.0\.0\.1[[:space:]]*$/ {next}
           {print}
         ' "$caddyfile" >"$scratch/Caddyfile"
-        reload_site "$scratch/Caddyfile"
+        reload_site "$scratch/Caddyfile" fixed-subscription
     fi
     if ! ss -H -lntp '( sport = :8443 )' |
         awk '$4 ~ /^(\*|0\.0\.0\.0|\[::\]):8443$/ && /"caddy"/ {found=1} END {exit !found}'; then
