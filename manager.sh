@@ -21,7 +21,9 @@ node_types=(vless vmess hysteria2 tuic anytls)
 
 accent='' green='' yellow='' red='' reset=''
 if [[ -t 1 && "${TERM:-dumb}" != dumb && -z "${NO_COLOR:-}" ]]; then
-    accent=$'\033[1;36m'; green=$'\033[1;32m'; yellow=$'\033[1;33m'; red=$'\033[1;31m'; reset=$'\033[0m'
+    accent=${JC_MENU_INK:-$'\033[37m'}
+    green=$accent; yellow=${JC_MENU_MUTED:-$accent}; red=$'\033[31m'
+    reset=$'\033[0m'${JC_MENU_INK:-}
 fi
 fail() { printf '%s操作未完成：%s%s\n' "$red" "$*" "$reset" >&2; exit 1; }
 cfg() { printf '/etc/%s/config.json' "$1"; }
@@ -1098,6 +1100,52 @@ CADDY
     fi
 }
 
+five_certificate_path() {
+    jq -er 'first(.inbounds[] | select(.type == "hysteria2") |
+        .tls.certificate_path | strings | select(length > 0))' "$1"
+}
+
+five_certificate() {
+    local config cert
+    config=$(cfg "$five")
+    [[ -s $config ]] || fail '请先完成五协议部署'
+    cert=$(five_certificate_path "$config") || fail '配置里没有可读取的 TLS 证书路径'
+    [[ -r $cert ]] || fail '找不到配置使用的 TLS 证书文件'
+    printf '证书文件：%s\n' "$cert"
+    openssl x509 -in "$cert" -noout -subject -issuer -startdate -enddate ||
+        fail '无法读取证书信息'
+    if ! openssl x509 -in "$cert" -noout -checkend 0 >/dev/null; then
+        fail '本机 TLS 证书已过期'
+    fi
+    if openssl x509 -in "$cert" -noout -checkend 1209600 >/dev/null; then
+        printf '%s\n' '本机证书距离到期超过 14 天。'
+    else
+        printf '%s\n' '本机证书将在 14 天内到期。'
+    fi
+}
+
+five_check() {
+    local config
+    config=$(cfg "$five")
+    [[ -s $config ]] || fail '请先完成五协议部署'
+    [[ -x $core ]] || fail '找不到 sing-box 内核'
+    check "$config" || fail '服务端配置校验失败'
+    printf '%s\n' '当前服务端配置通过 sing-box check。'
+}
+
+five_control() {
+    [[ -s $(cfg "$five") ]] || fail '请先完成五协议部署'
+    case $1 in
+        restart)
+            five_check
+            restart_managed "$five" || fail '重启或监听检查失败，请查看运行日志'
+            printf '%s\n' '五协议服务已重启，节点端口均已监听。' ;;
+        stop)
+            systemctl stop "$five" || fail '停止五协议服务失败'
+            printf '%s\n' '五协议服务已停止。' ;;
+    esac
+}
+
 five_summary() {
     local brief=${1:-} config rows domain cert expiry now days cert_color='' port handshake block
     config=$(cfg "$five")
@@ -1119,7 +1167,7 @@ five_summary() {
     fi
 
     domain=$(jq -r '.inbounds[] | select(.type=="vmess") | .tls.server_name // empty' "$config")
-    cert=$(jq -r '.inbounds[] | select(.type=="hysteria2") | .tls.certificate_path // empty' "$config")
+    cert=$(five_certificate_path "$config") || cert=''
     if [[ -r $cert ]] && expiry=$(openssl x509 -in "$cert" -enddate -noout 2>/dev/null) &&
         expiry=$(date -u -d "${expiry#notAfter=}" +%s 2>/dev/null); then
         now=$(date -u +%s)
@@ -1174,6 +1222,9 @@ JC
   five DOMAIN|- IP [--ports P1,P2,P3,P4,P5] [--uuid UUID] [--reality-target DOMAIN] [--reality-sni DOMAIN] [--preset-names HOST,HY2,TUIC,ANYTLS] [--template FILE] [--prepare-site yes]
   five-share [--publish [--fixed]|--v2rayn]
   five-port PROTOCOL PORT
+  five-control restart|stop
+  five-certificate
+  five-check
   five-address IP|--ipv4|--ipv6
 HELP
 }
@@ -1200,6 +1251,10 @@ if [[ $command_name == five-summary ]]; then
     five_summary "$@"
     exit
 fi
+case "$command_name" in
+    five-certificate) [[ $# == 0 ]] || fail '用法 five-certificate'; five_certificate; exit ;;
+    five-check) [[ $# == 0 ]] || fail '用法 five-check'; five_check; exit ;;
+esac
 exec 9>/run/lock/sing-box-yg-plus.lock
 flock -n 9 || fail '另一个 JC 操作正在运行'
 scratch=$(mktemp -d)
@@ -1248,6 +1303,9 @@ case "$command_name" in
         five_share "$@";;
     five-address) [[ $# == 1 ]] || fail '用法 five-address IP|--ipv4|--ipv6'; change_five_address "$1";;
     five-port) [[ $# == 2 ]] || fail '用法 five-port PROTOCOL PORT'; change_five_port "$@";;
+    five-control)
+        [[ $# == 1 && ( $1 == restart || $1 == stop ) ]] || fail '用法 five-control restart|stop'
+        five_control "$1" ;;
     five)
         [[ $# -ge 2 ]] || fail '缺少域名或公网节点地址'
         host=$1; arg=$2; port_text=''; uuid_text=''; reality_target=''; preset_names=''; reality_sni=''; prepare_site=''

@@ -128,6 +128,22 @@ grep -Eq 'VMess WS +TCP 28444' <<<"$summary"
 grep -Eq 'Hysteria 2 +UDP 8445' <<<"$summary"
 grep -F '距到期约' <<<"$summary" >/dev/null
 grep -F '已发布 · TCP 28443' <<<"$summary" >/dev/null
+certificate=$(five_certificate)
+grep -Eq '^subject=.*example\.com' <<<"$certificate"
+grep -Fq '本机证书将在 14 天内到期' <<<"$certificate"
+(
+    core=$(command -v bash)
+    before=$(sha256sum "$dir/config.json")
+    output=$(five_check)
+    grep -Fq '配置通过 sing-box check' <<<"$output"
+    systemctl() { printf '%s\n' "$*" >>"$test_dir/service-control"; }
+    socket_ready() { [[ $1 == "$five" && $# == 6 ]]; }
+    five_control restart
+    five_control stop
+    grep -Fxq "restart $five" "$test_dir/service-control"
+    grep -Fxq "stop $five" "$test_dir/service-control"
+    [[ $(sha256sum "$dir/config.json") == "$before" ]]
+)
 if grep -Eq '12345678-1234-1234-1234-123456789abc|test-private|vless://' <<<"$summary"; then
     echo 'Node overview exposed credentials' >&2
     exit 1

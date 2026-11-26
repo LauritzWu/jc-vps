@@ -49,7 +49,7 @@ if ! $installed; then
     printf '%s\n' "$revision" >"$dir/revision"
 fi
 (cd "$dir" && sha256sum --status --strict -c <<'SHA256'
-9ed7a0de648bc25cefadbd1bd19c8fed0b970fa5d3b5753ea21a99ece8280612  manager.sh
+cf0f737e005067f75cc0e0f9755948cfa26755a92ef2310a63a382e4f866010f  manager.sh
 d96d8e1440c7b53ef47625820c77fe58c95a4ff0cef1f989d68c53ff099a7d7b  client-template.json
 6dc765ad0e22eeeeed7d8edda757b79ab6cd67a4756970762a2ccb6c1f7fab42  lib/firewall.sh
 d1c7f57d69da15af90ef773dbcab1b3dd2fb89f70c42675a89d9c73575a3ea04  lib/launcher.sh
@@ -64,7 +64,7 @@ fi
 source "$dir/lib/firewall.sh"
 
 duo() {
-    bash "$dir/manager.sh" "$@" </dev/tty
+    JC_MENU_INK=${ink:-} JC_MENU_MUTED=${muted:-} bash "$dir/manager.sh" "$@" </dev/tty
 }
 five_service=$(bash "$dir/manager.sh" five-service)
 
@@ -378,33 +378,28 @@ quick_install() {
     fi
 }
 
-accent='' ink='' muted='' sketch='' green='' yellow='' red='' reset=''
+ink='' muted='' red='' terminal_reset=''
 if [[ -t 1 && "${TERM:-dumb}" != dumb && -z "${NO_COLOR:-}" ]]; then
-    accent=$'\033[33m'; ink=$'\033[37m'; muted=$ink; sketch=$'\033[33m'
-    green=$'\033[32m'; yellow=$'\033[33m'; red=$'\033[31m'; reset=$'\033[0m'
+    terminal_reset=$'\033[0m'
+    ink=$'\033[37m'
+    red=$'\033[31m'
+    if [[ ${JC_THEME:-dark} == light ]]; then ink=$'\033[30m'; fi
+    muted=$ink
     if [[ ${COLORTERM:-} == truecolor || ${COLORTERM:-} == 24bit ]]; then
         if [[ ${JC_THEME:-dark} == light ]]; then
-            accent=$'\033[38;2;118;91;62m'; ink=$'\033[38;2;56;52;45m'; muted=$'\033[38;2;109;103;93m'
-            sketch=$'\033[38;2;135;109;81m'; green=$'\033[38;2;70;100;74m'
-            yellow=$'\033[38;2;130;92;54m'; red=$'\033[38;2;148;71;64m'
+            ink=$'\033[38;2;52;50;47m'; muted=$'\033[38;2;107;104;99m'; red=$'\033[38;2;148;71;64m'
         else
-            accent=$'\033[38;2;202;184;158m'; ink=$'\033[38;2;222;218;210m'; muted=$'\033[38;2;168;164;154m'
-            sketch=$'\033[38;2;174;150;122m'; green=$'\033[38;2;148;172;152m'
-            yellow=$'\033[38;2;210;174;118m'; red=$'\033[38;2;216;154;146m'
+            ink=$'\033[38;2;222;220;215m'; muted=$'\033[38;2;171;169;164m'; red=$'\033[38;2;216;154;146m'
         fi
     elif [[ $TERM == *256color* ]]; then
         if [[ ${JC_THEME:-dark} == light ]]; then
-            accent=$'\033[38;5;94m'; ink=$'\033[38;5;235m'; muted=$'\033[38;5;240m'
-            sketch=$'\033[38;5;94m'; green=$'\033[38;5;22m'; yellow=$'\033[38;5;94m'; red=$'\033[38;5;124m'
+            ink=$'\033[38;5;235m'; muted=$'\033[38;5;241m'; red=$'\033[38;5;124m'
         else
-            accent=$'\033[38;5;180m'; ink=$'\033[38;5;253m'; muted=$'\033[38;5;247m'
-            sketch=$'\033[38;5;137m'; green=$'\033[38;5;108m'; yellow=$'\033[38;5;179m'; red=$'\033[38;5;174m'
+            ink=$'\033[38;5;253m'; muted=$'\033[38;5;248m'; red=$'\033[38;5;174m'
         fi
-    elif [[ ${JC_THEME:-dark} == light ]]; then
-        ink=$'\033[30m'
-        muted=$ink
     fi
 fi
+accent=$ink green=$ink yellow=$ink sketch=$muted reset=$terminal_reset$ink
 
 heading() { printf '\n%s%s%s\n' "$ink" "$1" "$reset"; }
 option() { printf ' %s%s%s  %s%s%s\n' "$accent" "$1" "$reset" "${3:-$ink}" "$2" "$reset"; }
@@ -681,6 +676,38 @@ vps_summary() {
         "$state_color" "$state" "$reset" "$autostart"
 }
 
+show_deployment() {
+    vps_summary detail
+    if [[ -s /etc/$five_service/config.json ]]; then
+        heading '五协议节点 · 配置端口'
+        duo five-summary || true
+    fi
+}
+
+follow_service_log() {
+    trap ':' INT
+    journalctl -u "$five_service.service" -n 20 --no-pager -f || true
+    trap - INT
+}
+
+logs_menu() {
+    local selection
+    while true; do
+        heading '运行日志'
+        option 1 '最近 50 条 sing-box 日志'
+        option 2 '实时跟随 sing-box 日志（Ctrl+C 返回）'
+        option 3 '最近 50 条 Caddy 日志'
+        choose 0
+        case "$selection" in
+            0) return ;;
+            1) journalctl -u "$five_service.service" -n 50 --no-pager || true; pause_menu ;;
+            2) follow_service_log ;;
+            3) journalctl -u caddy.service -n 50 --no-pager || true; pause_menu ;;
+            *) echo '无效选项。' ;;
+        esac
+    done
+}
+
 status_menu() {
     local selection
     while true; do
@@ -692,32 +719,27 @@ status_menu() {
         case "$selection" in
             0) return ;;
             1)
-                vps_summary detail
-                if [[ -s /etc/$five_service/config.json ]]; then
-                    heading '五协议节点 · 配置端口'
-                    duo five-summary || true
-                fi
+                show_deployment
                 heading '本机监听'
                 duo status || true
                 pause_menu ;;
-            2) journalctl -u "$five_service.service" -n 50 --no-pager || true ;;
-            3)
-                trap ':' INT
-                journalctl -u "$five_service.service" -n 20 --no-pager -f || true
-                trap - INT ;;
+            2) journalctl -u "$five_service.service" -n 50 --no-pager || true; pause_menu ;;
+            3) follow_service_log ;;
             *) echo '无效选项。' ;;
         esac
     done
 }
 
 service_menu() {
-    local selection answer kind port
+    local selection answer kind port verb command
     local port_kinds=(reality vmess hy2 tuic anytls)
     while true; do
         heading '服务管理'
         option 1 '启动或恢复五协议服务'
         option 2 '启用五协议开机自启（已有部署）'
         option 3 '更换单个五协议节点的端口'
+        option 4 '重启五协议服务'
+        option 5 '停止五协议服务'
         choose 1
         case "$selection" in
             0) return ;;
@@ -744,6 +766,12 @@ service_menu() {
                         systemctl enable "$five_service" && echo '已启用五协议开机自启。'
                     else echo '请先启动五协议服务。'; fi
                 fi ;;
+            4|5)
+                verb=重启 command=restart
+                if [[ $selection == 5 ]]; then verb=停止 command=stop; fi
+                printf '%s会中断节点连接，请确认当前 SSH 连接独立于这些节点。\n' "$verb"
+                read -r -p "确认${verb}？[y/N] " answer </dev/tty || return
+                if [[ $answer == [yY] ]]; then duo five-control "$command" || true; pause_menu; fi ;;
             *) echo '无效选项。' ;;
         esac
     done
@@ -758,7 +786,7 @@ tools_menu() {
         option 3 '手动覆盖服务器地区'
         option 4 '查看全部命令'
         option 5 '补齐快捷命令和基础组件'
-        option 6 '完整卸载 sing-box 和 JC' "$red"
+        option 6 '完整卸载 sing-box 和 JC'
         choose 1
         case "$selection" in
             0) return ;;
@@ -928,29 +956,34 @@ home_banner() {
     fi
 }
 
-home_pair() {
-    local width=$1 left=$2 left_text=$3 right=$4 right_text=$5
-    if (( width >= 80 )); then
-        local LC_ALL=C.UTF-8
-        # The labels in the left column contain only CJK characters.
-        printf ' %s%s%s  %s%s%s%*s%s%s%s  %s%s%s\n' "$accent" "$left" "$reset" "$ink" "$left_text" "$reset" \
-            "$((24 - 2 * ${#left_text}))" '' "$accent" "$right" "$reset" "$ink" "$right_text" "$reset"
-    else
-        option "$left" "$left_text"
-        option "$right" "$right_text"
-    fi
-}
-
 home_menu() {
-    local width=$1 deployed=$2
+    local deployed=$1
     heading '管理菜单'
-    if ! $deployed; then option 1 '一键安装 sing-box' "$green"; fi
-    home_pair "$width" 3 '服务状态' 4 '服务管理'
-    home_pair "$width" 5 '客户端与订阅' 6 '网络与防火墙'
-    home_pair "$width" 7 '系统工具' 0 '退出'
+    if $deployed; then option 1 '部署概况'; else option 1 '一键安装 sing-box'; fi
+    option 2 '运行日志'
+    option 3 '服务状态'
+    option 4 '服务管理'
+    option 5 '客户端与订阅'
+    printf '\n'
+    option 6 '网络与防火墙'
+    option 7 '系统工具'
+    option 8 'TLS 证书检查'
+    option 9 '配置体检'
+    printf '\n'
+    option 0 '退出'
     printf '\n'
 }
 
+finish_menu() {
+    local status=$?
+    if [[ -n $terminal_reset ]]; then printf '%s' "$terminal_reset" || true; fi
+    if ! $installed; then rm -rf -- "$dir"; fi
+    return "$status"
+}
+
+trap finish_menu EXIT
+export SYSTEMD_COLORS=0
+printf '%s' "$ink"
 if ! $installed; then init_tools; fi
 
 while true; do
@@ -958,7 +991,7 @@ while true; do
     home_banner "$width"
     deployed=false
     if five_deployed; then deployed=true; fi
-    home_menu "$width" "$deployed"
+    home_menu "$deployed"
     if $deployed; then
         while true; do
             read -r -p "${muted}输入菜单编号（0 退出）：$reset" selection </dev/tty || exit 1
@@ -970,14 +1003,17 @@ while true; do
     fi
     case "$selection" in
         1)
-            quick_install || echo '安装未完成，请查看上面的报错。'
+            if $deployed; then show_deployment
+            else quick_install || echo '安装未完成，请查看上面的报错。'; fi
             pause_menu ;;
-        2) printf '%s\n' '完整卸载已移至「系统工具 → 6 完整卸载」。'; tools_menu ;;
+        2) logs_menu ;;
         3) status_menu ;;
         4) service_menu ;;
         5) client_menu ;;
         6) firewall_menu ;;
         7) tools_menu ;;
+        8) heading 'TLS 证书检查'; duo five-certificate || true; pause_menu ;;
+        9) heading '配置体检'; duo five-check || true; pause_menu ;;
         0) exit 0 ;;
         *) printf '%s\n' '无效选项。' >&2 ;;
     esac
