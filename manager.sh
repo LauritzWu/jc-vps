@@ -266,7 +266,7 @@ uninstall() {
     for region in "$config_home/jc" "$config_home/lauritz-duo"; do
         if [[ -d $region && ! -L $region ]]; then files+=("$region/region" "$region/region.auto"); fi
     done
-    for shortcut in /usr/local/bin/singdeck /usr/local/bin/JC; do
+    for shortcut in /usr/local/bin/sdeck /usr/local/bin/singdeck /usr/local/bin/JC; do
         if [[ -L $shortcut && $(readlink -- "$shortcut") == jc ]]; then
             files+=("$shortcut")
         fi
