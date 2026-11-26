@@ -114,6 +114,7 @@ base64 -d "$profiles/five/all.sub" | cmp - "$dir/profiles/links.txt"
 caddyfile="$test_dir/Caddyfile"
 cat >"$caddyfile" <<'CADDY'
 example.com:8443 {
+    bind 127.0.0.1
     handle_path /profiles/five/* {
         file_server
     }
@@ -153,9 +154,10 @@ if (five_deploy example.com "$ipv4" 8443,8444,8445,8446,8447 12345678-1234-1234-
 fi
 
 grep -F '#VLESS-REALITY-New%20York' "$dir/profiles/links.txt" >/dev/null
+sed -i '/^    bind 127\.0\.0\.1$/d' "$caddyfile"
 summary=$(five_summary)
 grep -Eq 'REALITY +TCP 443 +SNI: www\.microsoft\.com' <<<"$summary"
-grep -F '已发布 · TCP 8443' <<<"$summary" >/dev/null
+grep -F '已发布 · TCP 8443（固定入口）' <<<"$summary" >/dev/null
 rm -- "$profiles/five/all.sub"
 grep -F '未发布' <<<"$(five_summary)" >/dev/null
 

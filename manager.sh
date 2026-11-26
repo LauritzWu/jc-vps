@@ -826,7 +826,7 @@ change_five_port() {
     printf '%s 端口已从 %s 改为 %s/%s。备份位于 %s\n' "$kind" "$old_port" "$new_port" "$transport" "$backup"
     echo '请核对云防火墙，从客户端重新导入受影响的节点并复测。'
     if [[ $kind == reality ]]; then
-        if [[ -n ${domain:-} ]] && fixed_subscription_block "$(site_block "$domain")"; then
+        if [[ -n ${domain:-} && -r $caddyfile ]] && fixed_subscription_block "$(site_block "$domain")"; then
             echo '固定 HTTPS 订阅地址仍使用 TCP 8443，请在客户端刷新订阅。'
         else
             echo '若订阅使用 REALITY 入口，请在「客户端与订阅」→「发布五协议单节点及聚合订阅」查看并更新订阅地址。'
@@ -1139,7 +1139,7 @@ five_summary() {
         port=$(jq -r '.inbounds[] | select(.type=="vless") | .listen_port' "$config")
         handshake=$(jq -r '.inbounds[] | select(.type=="vless") | .tls.reality.handshake.server' "$config")
         if fixed_subscription_block "$block"; then
-            printf ' HTTPS 订阅   固定入口 · TCP 8443\n'
+            printf ' HTTPS 订阅   已发布 · TCP 8443（固定入口）\n'
         elif [[ $handshake == 127.0.0.1 ]]; then
             printf ' HTTPS 订阅   已发布 · TCP %s\n' "$port"
         else
