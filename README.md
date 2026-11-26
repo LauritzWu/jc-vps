@@ -2,21 +2,21 @@
 
 面向个人 VPS 的 sing-box 管理工具。使用官方 APT 版 sing-box，提供五协议安装向导，支持选择 IPv4 或 IPv6 节点地址，并可发布带密码的 HTTPS 订阅。
 
-## 一键安装 v1.5.1
+## 一键安装 v1.5.2
 
-在 VPS 的 root Bash 会话中运行。入口需要 curl。安装脚本、管理脚本、客户端模板和管理入口均使用同一提交。v1.5.1 安装后用 `singdeck` 打开菜单。
+在 VPS 的 root Bash 会话中运行。入口需要 curl。安装脚本、管理脚本、客户端模板和管理入口均使用同一提交。v1.5.2 安装后用 `sd` 打开菜单。
 
 ```bash
-revision=a89f65ab21551480d88d91145154544d1cd3a324
+revision=07a35ecec6781235203490b438d25d20e8ca2a64
 s=$(curl -4fsSL -m 25 "https://raw.githubusercontent.com/LauritzWu/singdeck/$revision/bootstrap.sh") &&
   bash -c "$s" -- "$revision"
 ```
 
-新部署可选「1 一键安装 sing-box」或直接回车。已有部署运行上述命令即可更新管理入口，节点无需重装。详见 [v1.5.1 发布说明](https://github.com/LauritzWu/singdeck/releases/tag/v1.5.1)。
+新部署可选「1 一键安装 sing-box」或直接回车。已有部署运行上述命令即可更新管理入口，节点无需重装。详见 [v1.5.2 发布说明](https://github.com/LauritzWu/singdeck/releases/tag/v1.5.2)。
 
 ### 本地管理与终端菜单
 
-SingDeck 原名 JC。下文的 `sd` 用法适用于下一版。按上方命令安装 v1.5.1 后，请在下文示例中使用 `singdeck`。升级后，已安装的 `singdeck`、`jc` 和 `JC` 入口仍可使用。
+SingDeck 原名 JC。运行 `sd` 可以打开管理菜单。升级后，已安装的 `singdeck`、`jc` 和 `JC` 入口仍可使用。
 
 安装入口会校验脚本、模板和模块，再将它们安装到 `/usr/local/lib/jc`，之后 `sd` 从本地打开菜单，查看状态和日志时无需访问 GitHub。仍可在「系统工具」手动补齐工具依赖。从第二个本地版本起，运行 `sd --rollback` 可切回上一个已安装的管理入口。
 
