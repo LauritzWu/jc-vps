@@ -378,22 +378,36 @@ quick_install() {
     fi
 }
 
-accent='' green='' yellow='' red='' reset=''
+accent='' ink='' muted='' sketch='' green='' yellow='' red='' reset=''
 if [[ -t 1 && "${TERM:-dumb}" != dumb && -z "${NO_COLOR:-}" ]]; then
-    accent=$'\033[1;33m'; green=$'\033[32m'; yellow=$'\033[33m'; red=$'\033[31m'; reset=$'\033[0m'
+    accent=$'\033[1;33m'; ink=$'\033[37m'; muted=$ink; sketch=$'\033[33m'
+    green=$'\033[32m'; yellow=$'\033[33m'; red=$'\033[31m'; reset=$'\033[0m'
     if [[ ${COLORTERM:-} == truecolor || ${COLORTERM:-} == 24bit ]]; then
         if [[ ${JC_THEME:-dark} == light ]]; then
-            accent=$'\033[1;38;2;128;85;46m'; green=$'\033[38;2;58;97;64m'
+            accent=$'\033[1;38;2;128;85;46m'; ink=$'\033[38;2;52;42;33m'; muted=$'\033[38;2;101;90;80m'
+            sketch=$'\033[38;2;125;88;57m'; green=$'\033[38;2;58;97;64m'
             yellow=$'\033[38;2;132;85;19m'; red=$'\033[38;2;152;63;55m'
         else
-            accent=$'\033[1;38;2;226;189;146m'; green=$'\033[38;2;169;199;160m'
+            accent=$'\033[1;38;2;232;192;141m'; ink=$'\033[38;2;237;226;209m'; muted=$'\033[38;2;182;173;160m'
+            sketch=$'\033[38;2;215;183;143m'; green=$'\033[38;2;169;199;160m'
             yellow=$'\033[38;2;233;190;117m'; red=$'\033[38;2;236;163;152m'
         fi
+    elif [[ $TERM == *256color* ]]; then
+        if [[ ${JC_THEME:-dark} == light ]]; then
+            accent=$'\033[1;38;5;94m'; ink=$'\033[38;5;235m'; muted=$'\033[38;5;240m'
+            sketch=$'\033[38;5;94m'; green=$'\033[38;5;22m'; yellow=$'\033[38;5;94m'; red=$'\033[38;5;124m'
+        else
+            accent=$'\033[1;38;5;223m'; ink=$'\033[38;5;255m'; muted=$'\033[38;5;250m'
+            sketch=$'\033[38;5;180m'; green=$'\033[38;5;150m'; yellow=$'\033[38;5;222m'; red=$'\033[38;5;174m'
+        fi
+    elif [[ ${JC_THEME:-dark} == light ]]; then
+        ink=$'\033[30m'
+        muted=$ink
     fi
 fi
 
 heading() { printf '\n%s%s%s\n' "$accent" "$1" "$reset"; }
-option() { printf ' %s%s%s  %s%s%s\n' "$accent" "$1" "$reset" "${3:-}" "$2" "$reset"; }
+option() { printf ' %s%s%s  %s%s%s\n' "$accent" "$1" "$reset" "${3:-$ink}" "$2" "$reset"; }
 choose() {
     read -r -p "${yellow}请选择 [默认 $1，0 返回]：$reset" selection </dev/tty || exit 1
     selection=${selection:-$1}
@@ -642,8 +656,8 @@ vps_summary() {
     fi
 
     if [[ $mode == brief ]]; then
-        printf ' %s\n' "${os:-系统未知}"
-        printf ' sing-box     %s%s%s%s\n' "$state_color" "$state" "$reset" "$autostart"
+        printf ' %s%s%s\n' "$muted" "${os:-系统未知}" "$reset"
+        printf ' %ssing-box     %s%s%s%s%s\n' "$ink" "${state_color:-$ink}" "$state" "$muted" "$autostart" "$reset"
         return
     fi
 
@@ -776,37 +790,137 @@ home_width() {
     printf '%s' "$columns"
 }
 
-home_banner() {
-    printf '\n'
-    if [[ ${JC_BANNER:-} == full ]] && (( $1 >= 48 )); then
-        printf '%s' "$accent"
-        if (( $1 >= 78 )); then
+home_portrait() {
+    case $1 in
+        wide)
             cat <<'SHEPHERD'
-           /\                 /\
-          /  \               /  \
-         / /\ \_____________/ /\ \
-        / /  \               /  \ \            ███████╗  ██████╗
-       /_/    \             /    \_\      ██╔══██╗██║   ██║██╔═══██╗
-       \       ●           ●       /      ██║  ██║██║   ██║██║   ██║
-        \         _______         /            ╚══██╔═╝ ██╔════╝
-         \       /       \       /                ██║   ██║
-          \_____ \___▼___/ _____/            ██   ██║   ██║
-                \___/ \___/
-                                          JC
-                                          GERMAN SHEPHERD EDITION
+               ⢠⣶⣄
+              ⢠⢯⣿⣿⡄
+             ⢠⣟⣾⡟⣿⣷  ⣴⣿
+            ⢠⡟⣼⣿⡇⢹⣿⣀⡼⣽⣿
+           ⢠⣿⡇⣿⣿⠇⢀⣿⣿⣷⣿⢿
+          ⢰⣿⡗⡿⡞⣿⣇⢼⣿⣷⣇⣩⣟⣤⣀
+         ⢀⣟⣿⣷⣧⣤⣼⠿⠛⣿⢋⣾⢿⣿⠛⠉⠳⢦⡀
+        ⣠⣿⡇⢹⣿⡏⢿⣿⣷⣴⢟⣾⣧⠔⠓⣁⣔⣿⣷⢼⡆
+       ⣠⣿⠿⣿⡀⢹⣷⢪⣿⣿⠟⣾⣿⣿⣷⢾⣟⠻⢿⣿⣷⣑⠤⣀
+      ⣨⡿⠑⠁⠘⢱⣠⡿⠛⣿⣡⡾⠛⠉   ⠙⠷⠆⠉⣿⣏⣓⣶⣭⣔⣤⣄
+     ⢀⣿⣷⣴⢂⣤⠾⠉⣴⣞⠿⠁  ⠚  ⣤⣄⣀⣴⣾⣿⣿⣿⣿⣿⣿⣿⣏⣽⣶
+    ⢀⣽⣿⣟⣏⣿⡗  ⣥⢀  ⢀ ⡀ ⠚⠻⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⡿⠇
+   ⣠⣿⣿⣿⣿⣿⣾⣅⠄ ⢹⢇ ⠈⠙⠿⠟⢛⣿⣾⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⠟⠁
+  ⠐⣻⢏⢉⣩⡝⠛⢿⣿⣤⡄ ⠙⠿⣷⡄   ⣰⣿⣿⠟⠛⠛⠋⠉⠉⠙⠉⠉
+ ⢀⣼⣿⠟⠟⠋   ⠙⢿⣷⣿⣄⣄⠠⡙⢷⡀⢀⠿⠃⣿⠆
+  ⡼⣋⣀⣤⢄⣀ ⠁⠁ ⠁⠙⠻⣿⣷⣿⠂ ⢠⢇ ⣸⣷
+  ⠜⠉⠋⠑⠻⠷⠟⠷⣶⣤⠄  ⠈⠙⢿⣇⢠⢀⠁⢠⣿⠇
+          ⠉⠉⠙⠛⠶⠷⣦⡁⠙⠻⣦⡀⣼⡇
+                 ⠉   ⠁⠏
 SHEPHERD
-        else
+            ;;
+        medium)
             cat <<'SHEPHERD'
-       /\       /\
-      /  \_____/  \
-     /  ●       ●  \
-     \      ▼      /    JC
-      \____/ \____/     German Shepherd Edition
+            ⢠⣶⡄
+           ⢠⢷⣿⣿⡀  ⣀
+          ⢠⢿⣿⠟⣿⡇⢀⣾⣿
+         ⢠⣿⣿⣿⡇⢹⣷⣿⣿⣿
+        ⢰⣿⢿⣾⣿⣇⣾⣿⣿⣛⣿⣄
+       ⢰⣟⣿⣽⣤⣼⡿⢻⡟⣽⠿⣿⠋⢙⡦⡀
+      ⢠⣿⣇⢿⣿⢹⣿⣷⡿⣽⣿⣆⢉⣴⣿⣿⡞⡇
+     ⢴⡿⠻⢷ ⢿⣵⣿⢟⣵⡿⠟⠟⠛⢮⣝⠿⣿⣮⣖⡤⢄⡀
+    ⢰⣟⣅⡄⢀⡵⢟⣠⣿⠟⠁⢀⠄ ⢀⠈⢁⣤⣿⣷⣷⣿⣿⣿⡷⢦⡄
+   ⢀⣿⣿⣟⣽⡍ ⢘⠁⠁    ⠴⢿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⠃
+  ⣠⣿⣿⣿⣿⣼⣅ ⢐⢟⢀⠐⠟⠟⠓⣷⣾⣿⣿⣿⣿⣿⣿⣿⣿⣿⠟⠁
+ ⠐⣿⣣⣭⡕⠉⠻⣿⣶⢀⠈⠛⢷⣄  ⣰⣿⣿⠉⠉⠉⠉⠉⠉⠁
+ ⢞⡿⠛⠁ ⠐⢄⠌⠛⢿⣧⣦⣔⣝⠃ ⡏⠁⣿⡀
+ ⢈⠶⠾⢫⣶⣤⣄⣄  ⠈⠛⢿⣷⢀⠐⠗⢀⣿⠃
+        ⠛⠛⠶⠤⢤⣄⠙⠷⣇ ⣸⡇
+             ⠈⠑  ⠑⠇⠁
 SHEPHERD
-        fi
-        printf '%s\n' "$reset"
+            ;;
+        compact)
+            cat <<'SHEPHERD'
+         ⣴⣦
+        ⣰⣿⣿⡆⢀⣴
+       ⣼⣿⣿⢸⣧⣾⣿
+      ⣴⣟⠿⢿⣼⣿⣏⣿⣄⡀
+     ⣼⡿⣿⢿⣿⣭⣧⣏⠿⢁⣼⣇⡄
+    ⣼⠿⡇⢹⣾⣿⢿⡿⠿⠾⣝⡻⢷⣕⣄⢀
+   ⣸⣧⣄⡤⢟⣵⠟⠉⠠ ⣠⣈⣥⣾⣿⣿⣿⣿⣗⡄
+  ⣴⣿⣿⣿⠁ ⡤ ⢤⣤⣤⣝⣿⣿⣿⣿⣿⣿⣿⡟⠁
+ ⢸⣏⣩⠟⠻⣧⣄⡙⠷⣄ ⢈⣿⣿⠛⠛⠛⠛⠋⠁
+⠐⡿⣋⡁⡀⠐⠌⠛⠷⣶⣾⠁⢐⠁⣿
+ ⠈⠉⠙⠛⠓⠶⢤⣀⣈⠻⣴⡈⢰⡟
+         ⠉⠓ ⠙⠘⠁
+SHEPHERD
+            ;;
+    esac
+}
+
+home_overview() {
+    local health line
+    vps_summary brief
+    if [[ -s /etc/$five_service/config.json ]] && health=$(duo five-summary --brief); then
+        while IFS= read -r line; do
+            printf '%s%s%s\n' "$ink" "$line" "$reset"
+        done <<<"$health"
     fi
-    printf ' %sJC%s · VPS 管理\n\n' "$accent" "$reset"
+}
+
+home_banner() {
+    local LC_ALL=C.UTF-8
+    local width=$1 style art_width index row slot start
+    local portrait=() title=() overview=()
+    printf '\n'
+    if [[ ${JC_BANNER:-} == plain ]] || (( width < 28 )); then
+        printf ' %sJC%s · VPS 管理\n' "$accent" "$reset"
+        heading '运行概况'
+        home_overview
+        return
+    fi
+
+    if (( width >= 84 )); then
+        style=wide art_width=38
+    elif (( width >= 54 )); then
+        style=medium art_width=31
+    else
+        style=compact art_width=23
+    fi
+    mapfile -t portrait < <(home_portrait "$style")
+    if (( width >= 66 )); then
+        title=(
+            "$accent  █████   ██████$reset"
+            "$accent     ██  ██$reset"
+            "$accent     ██  ██$reset"
+            "$accent ██  ██  ██$reset"
+            "$accent  ████    ██████$reset"
+            ''
+            "$accent  JC · VPS 管理$reset"
+            "$muted  GERMAN SHEPHERD EDITION$reset"
+        )
+    elif (( width >= 43 )); then
+        title=("$accent"'JC · VPS 管理'"$reset")
+    fi
+    if (( width >= 78 )); then
+        mapfile -t overview < <(home_overview)
+        title+=('' "$accent"'  运行概况'"$reset" "${overview[@]}")
+    fi
+
+    start=$(( (${#portrait[@]} - ${#title[@]}) / 2 ))
+    for index in "${!portrait[@]}"; do
+        row=${portrait[index]}
+        slot=$((index - start))
+        if (( slot >= 0 && slot < ${#title[@]} )) && [[ -n ${title[slot]} ]]; then
+            printf ' %s%s%s%*s%s\n' "$sketch" "$row" "$reset" \
+                "$((art_width + 4 - ${#row}))" '' "${title[slot]}"
+        else
+            printf ' %s%s%s\n' "$sketch" "$row" "$reset"
+        fi
+    done
+    if (( ${#title[@]} == 0 )); then
+        printf '\n %sJC%s · VPS 管理\n' "$accent" "$reset"
+    fi
+    if (( width < 78 )); then
+        heading '运行概况'
+        home_overview
+    fi
 }
 
 home_pair() {
@@ -814,8 +928,8 @@ home_pair() {
     if (( width >= 80 )); then
         local LC_ALL=C.UTF-8
         # The labels in the left column contain only CJK characters.
-        printf ' %s%s%s  %s%*s%s%s%s  %s\n' "$accent" "$left" "$reset" "$left_text" \
-            "$((24 - 2 * ${#left_text}))" '' "$accent" "$right" "$reset" "$right_text"
+        printf ' %s%s%s  %s%s%s%*s%s%s%s  %s%s%s\n' "$accent" "$left" "$reset" "$ink" "$left_text" "$reset" \
+            "$((24 - 2 * ${#left_text}))" '' "$accent" "$right" "$reset" "$ink" "$right_text" "$reset"
     else
         option "$left" "$left_text"
         option "$right" "$right_text"
@@ -824,7 +938,7 @@ home_pair() {
 
 home_menu() {
     local width=$1 deployed=$2
-    printf '\n'
+    heading '管理菜单'
     if ! $deployed; then option 1 '一键安装 sing-box' "$green"; fi
     home_pair "$width" 3 '服务状态' 4 '服务管理'
     home_pair "$width" 5 '客户端与订阅' 6 '网络与防火墙'
@@ -839,18 +953,14 @@ while true; do
     home_banner "$width"
     deployed=false
     if five_deployed; then deployed=true; fi
-    vps_summary brief
-    if [[ -s /etc/$five_service/config.json ]]; then
-        duo five-summary --brief || true
-    fi
     home_menu "$width" "$deployed"
     if $deployed; then
         while true; do
-            read -r -p "${yellow}输入菜单编号（0 退出）：$reset" selection </dev/tty || exit 1
+            read -r -p "${accent}输入菜单编号（0 退出）：$reset" selection </dev/tty || exit 1
             [[ -n $selection ]] && break
         done
     else
-        read -r -p "${yellow}请选择 [回车默认 1 安装，0 退出]：$reset" selection </dev/tty || exit 1
+        read -r -p "${accent}请选择 [回车默认 1 安装，0 退出]：$reset" selection </dev/tty || exit 1
         selection=${selection:-1}
     fi
     case "$selection" in
