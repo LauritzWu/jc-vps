@@ -266,9 +266,11 @@ uninstall() {
     for region in "$config_home/jc" "$config_home/lauritz-duo"; do
         if [[ -d $region && ! -L $region ]]; then files+=("$region/region" "$region/region.auto"); fi
     done
-    if [[ -L /usr/local/bin/JC && $(readlink -- /usr/local/bin/JC) == jc ]]; then
-        files+=("/usr/local/bin/JC")
-    fi
+    for shortcut in /usr/local/bin/singdeck /usr/local/bin/JC; do
+        if [[ -L $shortcut && $(readlink -- "$shortcut") == jc ]]; then
+            files+=("$shortcut")
+        fi
+    done
     for shortcut in /usr/local/bin/jc /usr/local/bin/duo; do
         if [[ -f $shortcut && ! -L $shortcut ]] &&
            grep -qxF -e '# Managed by JC' -e '# Managed by Lauritz Duo' "$shortcut"; then
@@ -1252,7 +1254,7 @@ five_summary() {
 
 help_text() {
     cat <<'HELP'
-JC
+SingDeck
   packages [--no-caddy] [--restart-managed] [--version VERSION]
   uninstall
   site DOMAIN

@@ -9,7 +9,7 @@ if [[ ${1:-} == --installed ]]; then
     shift
     action=${1:-}
     if (( $# > 1 )) || [[ -n $action && $action != --check && $action != --rollback ]]; then
-        printf '用法：jc [--rollback]\n' >&2
+        printf '用法：singdeck [--rollback]\n' >&2
         exit 2
     fi
     dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
@@ -49,7 +49,7 @@ if ! $installed; then
     printf '%s\n' "$revision" >"$dir/revision"
 fi
 (cd "$dir" && sha256sum --status --strict -c <<'SHA256'
-ab34efa972415de6789b0b3394a9655e908ac201a829dbd20c15d6f61e642f04  manager.sh
+d18dae1f35fa5ceff7dd435ed8c7934389f44b5391da5d46711bde336b5c969a  manager.sh
 d96d8e1440c7b53ef47625820c77fe58c95a4ff0cef1f989d68c53ff099a7d7b  client-template.json
 6dc765ad0e22eeeeed7d8edda757b79ab6cd67a4756970762a2ccb6c1f7fab42  lib/firewall.sh
 d1c7f57d69da15af90ef773dbcab1b3dd2fb89f70c42675a89d9c73575a3ea04  lib/launcher.sh
@@ -506,17 +506,19 @@ core_menu() {
 }
 
 install_shortcut() {
-    local alias_path=/usr/local/bin/JC
+    local alias_path result=0
     jc_install_launcher "$dir" "$installed" || return 1
-    if [[ -L $alias_path && $(readlink -- "$alias_path") == jc ]]; then
-        return 0
-    fi
-    if [[ -e $alias_path || -L $alias_path ]]; then
-        printf '发现其他程序使用 %s，保留原文件。可继续使用 jc。\n' "$alias_path" >&2
-        return 1
-    fi
-    ln -sT -- jc "$alias_path" || return 1
-    echo 'JC 快捷命令已安装。'
+    for alias_path in "${jc_launcher%/*}/singdeck" "${jc_launcher%/*}/JC"; do
+        if [[ -L $alias_path && $(readlink -- "$alias_path") == jc ]]; then
+            continue
+        fi
+        if [[ -e $alias_path || -L $alias_path ]] || ! ln -sT -- jc "$alias_path"; then
+            printf '无法安装快捷命令 %s。可继续使用 jc。\n' "$alias_path" >&2
+            result=1
+        fi
+    done
+    if (( result == 0 )); then echo 'SingDeck 快捷命令已安装。'; fi
+    return "$result"
 }
 
 init_tools() {
@@ -533,30 +535,32 @@ init_tools() {
 }
 
 shortcut_menu() {
-    local target=/usr/local/bin/jc alias_path=/usr/local/bin/JC
+    local target=$jc_launcher alias_path
     local shortcuts=()
     while true; do
-        heading '管理 JC 快捷命令'
-        option 1 '安装 jc / JC 快捷命令'
-        option 2 '卸载 jc / JC 快捷命令（节点服务继续运行）'
+        heading '管理 SingDeck 快捷命令'
+        option 1 '安装 singdeck / jc / JC 快捷命令'
+        option 2 '卸载 singdeck / jc / JC 快捷命令（节点服务继续运行）'
         choose
         case "$selection" in
             0) return ;;
             1) install_shortcut || true ;;
             2)
                 shortcuts=()
-                if [[ -L $alias_path && $(readlink -- "$alias_path") == jc ]]; then
-                    shortcuts+=("$alias_path")
-                fi
+                for alias_path in "${target%/*}/singdeck" "${target%/*}/JC"; do
+                    if [[ -L $alias_path && $(readlink -- "$alias_path") == jc ]]; then
+                        shortcuts+=("$alias_path")
+                    fi
+                done
                 if [[ -f $target && ! -L $target ]] &&
                     grep -qxF -e '# Managed by JC' -e '# Managed by Lauritz Duo' "$target"; then
                     shortcuts+=("$target")
                 fi
                 if (( ! ${#shortcuts[@]} )); then
-                    echo '未发现由 JC 安装的快捷命令。'
+                    echo '未发现由 SingDeck 安装的快捷命令。'
                     continue
                 fi
-                if jc_confirm '卸载 jc / JC 快捷命令？' </dev/tty; then
+                if jc_confirm '卸载 singdeck / jc / JC 快捷命令？' </dev/tty; then
                     rm -f -- "${shortcuts[@]}" && echo '快捷命令已卸载。'
                 fi ;;
             *) echo '无效选项。' ;;
@@ -757,11 +761,11 @@ tools_menu() {
     while true; do
         heading '系统工具'
         option 1 '查看或更新官方内核'
-        option 2 '安装或卸载 jc / JC 快捷命令'
+        option 2 '安装或卸载 singdeck / jc / JC 快捷命令'
         option 3 '手动覆盖服务器地区'
         option 4 '查看全部命令'
         option 5 '补齐快捷命令和基础组件'
-        option 6 '完整卸载 sing-box 和 JC'
+        option 6 '完整卸载 sing-box 和 SingDeck'
         choose
         case "$selection" in
             0) return ;;
@@ -877,7 +881,7 @@ home_banner() {
     local portrait=() title=() overview=()
     printf '\n'
     if [[ ${JC_BANNER:-} == plain ]] || (( width < 28 )); then
-        printf ' %sJC%s · VPS 管理\n' "$accent" "$reset"
+        printf ' %sSingDeck%s · VPS 管理\n' "$accent" "$reset"
         heading '运行概况'
         home_overview
         return
@@ -891,19 +895,13 @@ home_banner() {
         style=compact art_width=23
     fi
     mapfile -t portrait < <(home_portrait "$style")
-    if (( width >= 66 )); then
+    if (( width >= 54 )); then
         title=(
-            "$accent  ▀▀▀▀▀▌    ▄▀▀▀▀▀▄$reset"
-            "$accent       ▌   ▐$reset"
-            "$accent       ▌   ▐$reset"
-            "$accent  ▖    ▌   ▐$reset"
-            "$accent   ▀▄▄▀     ▀▄▄▄▄▄▀$reset"
-            ''
-            "$ink  VPS 管理$reset"
-            "$muted  GERMAN SHEPHERD EDITION$reset"
+            "$accent  SingDeck$reset"
+            "$muted  sing-box · VPS 管理$reset"
         )
     elif (( width >= 43 )); then
-        title=("$accent"'JC · VPS 管理'"$reset")
+        title=("$accent"'SingDeck · VPS 管理'"$reset")
     fi
     if (( width >= 78 )); then
         mapfile -t overview < <(home_overview)
@@ -922,7 +920,7 @@ home_banner() {
         fi
     done
     if (( ${#title[@]} == 0 )); then
-        printf '\n %sJC%s · VPS 管理\n' "$accent" "$reset"
+        printf '\n %sSingDeck%s · VPS 管理\n' "$accent" "$reset"
     fi
     if (( width < 78 )); then
         heading '运行概况'
