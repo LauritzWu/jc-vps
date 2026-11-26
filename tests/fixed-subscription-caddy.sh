@@ -75,6 +75,7 @@ systemctl() {
 # The fixture runs as root. An extracted Caddy package has no installed
 # service account, so its published files use group root in this case.
 if ! getent group caddy >/dev/null; then
+    profile_dir() { mkdir -p -m 750 -- "$1"; }
     chgrp() {
         if [[ $1 == caddy ]]; then shift; command chgrp root "$@"
         else command chgrp "$@"; fi
