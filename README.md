@@ -2,29 +2,29 @@
 
 面向个人 VPS 的 sing-box 管理工具。使用官方 APT 版 sing-box，提供五协议安装向导，支持选择 IPv4 或 IPv6 节点地址，并可发布带密码的 HTTPS 订阅。
 
-## 一键安装 v1.5.0
+## 一键安装 v1.5.1
 
-在 VPS 的 root Bash 会话中运行。入口需要 curl。安装脚本、管理脚本、客户端模板和后续的 `jc` 命令均使用同一提交。
+在 VPS 的 root Bash 会话中运行。入口需要 curl。安装脚本、管理脚本、客户端模板和后续的 `singdeck` 命令均使用同一提交。
 
 ```bash
-revision=7c24a8e17fc8c9dd6f4acc634a3f3bd335154d45
+revision=a89f65ab21551480d88d91145154544d1cd3a324
 s=$(curl -4fsSL -m 25 "https://raw.githubusercontent.com/LauritzWu/jc-vps/$revision/bootstrap.sh") &&
   bash -c "$s" -- "$revision"
 ```
 
-新部署可选「1 一键安装 sing-box」或直接回车。已有部署运行上述命令即可更新管理入口，节点无需重装。详见 [v1.5.0 发布说明](https://github.com/LauritzWu/jc-vps/releases/tag/v1.5.0)。
+新部署可选「1 一键安装 sing-box」或直接回车。已有部署运行上述命令即可更新管理入口，节点无需重装。详见 [v1.5.1 发布说明](https://github.com/LauritzWu/jc-vps/releases/tag/v1.5.1)。
 
 ### 本地管理与终端菜单
 
-SingDeck 原名 JC。包含 SingDeck 品牌更新的版本可用 `singdeck` 打开菜单，也可继续使用 `jc` 或 `JC`。上面标注的 v1.5.0 正式版仍使用原有命令。
+SingDeck 原名 JC。安装后可用 `singdeck` 打开菜单，已有的 `jc` 和 `JC` 命令也可以继续使用。
 
-安装入口会校验脚本、模板和模块，再将它们安装到 `/usr/local/lib/jc`，之后 `jc` 从本地打开菜单，查看状态和日志时无需访问 GitHub。仍可在「系统工具」手动补齐工具依赖。从第二个本地版本起，运行 `jc --rollback` 可切回上一个已安装的管理入口。
+安装入口会校验脚本、模板和模块，再将它们安装到 `/usr/local/lib/jc`，之后 `singdeck` 从本地打开菜单，查看状态和日志时无需访问 GitHub。仍可在「系统工具」手动补齐工具依赖。从第二个本地版本起，运行 `singdeck --rollback` 可切回上一个已安装的管理入口。
 
-v1.5.0 首页使用暖灰正文、陶土色强调和德牧侧脸。首页采用单列菜单，安装前 `1` 打开向导，安装后 `1` 查看部署概况。`2` 查看 sing-box 或 Caddy 日志，`8` 查本机 TLS 证书，`9` 校验服务端配置。可从「服务管理」重启或停止服务。
+SingDeck 首页使用暖灰正文、陶土色强调和德牧侧脸。首页采用单列菜单，安装前 `1` 打开向导，安装后 `1` 查看部署概况。`2` 查看 sing-box 或 Caddy 日志，`8` 查本机 TLS 证书，`9` 校验服务端配置。可从「服务管理」重启或停止服务。
 
 每个普通编号菜单回车选择 `1`。确认提示统一显示 `[Y/N]`，支持大小写，回车确认。完整卸载位于「系统工具 → 6 完整卸载」，删除节点配置前的独立确认回车取消。
 
-终端字体和背景可在本地 SSH 客户端设置。可使用 Sarasa Term SC 13 pt 常规字重。深色背景可用 `#262520`，浅色背景可用 `#F5F1E8`。使用浅色背景时运行 `JC_THEME=light jc`，纯文字标题用 `JC_BANNER=plain jc`，关闭着色用 `NO_COLOR=1 jc`。
+终端字体和背景可在本地 SSH 客户端设置。可使用 Sarasa Term SC 13 pt 常规字重。深色背景可用 `#262520`，浅色背景可用 `#F5F1E8`。使用浅色背景时运行 `JC_THEME=light singdeck`，纯文字标题用 `JC_BANNER=plain singdeck`，关闭着色用 `NO_COLOR=1 singdeck`。
 
 **v1.5.0 实测**覆盖 Ubuntu 24.04 LTS 的公网 IPv4 固定订阅迁移。迁移时旧 REALITY 入口与固定 TCP 8443 入口均通过 HTTPS 鉴权。更换 REALITY 端口后，固定入口的 JSON 和 Base64 订阅均返回新端口，Sub-Store 刷新和 Windows 客户端连通性通过。公网 IPv6 节点换地址和手机端订阅刷新留待后续验证。
 
@@ -34,7 +34,7 @@ v1.5.0 首页使用暖灰正文、陶土色强调和德牧侧脸。首页采用�
 
 在「3 服务状态」可查看本机监听和最近 50 条运行日志。服务器地区通过 ipwho.is 按 VPS 公网出口 IP 查询并缓存 24 小时。在「系统工具 → 手动覆盖服务器地区」可手动设置，已保存的地区优先使用。
 
-首次运行自动安装 `jc` 快捷命令，并通过 APT 补齐缺失的 jq、qrencode、OpenSSL、iproute2 和 flock。输入 `jc` 或 `JC` 都可打开菜单。已有 `duo` 的用户可运行一次 `duo`，新版会自动安装 `jc`。主菜单选「一键安装 sing-box」，按顺序选择内核、输入域名和公网节点地址（IPv4 或 IPv6）、分配端口、生成或填写 UUID，最后确认安装。
+首次运行自动安装 `singdeck`、`jc` 和 `JC` 快捷命令，并通过 APT 补齐缺失的 jq、qrencode、OpenSSL、iproute2 和 flock。已有 `duo` 的用户可运行一次 `duo`，新版会自动安装 `jc`。主菜单选「一键安装 sing-box」，按顺序选择内核、输入域名和公网节点地址（IPv4 或 IPv6）、分配端口、生成或填写 UUID，最后确认安装。
 
 ## 卸载和重装
 
@@ -69,7 +69,7 @@ v1.5.0 首页使用暖灰正文、陶土色强调和德牧侧脸。首页采用�
 
 ## 连不上时怎么查
 
-1. 运行 `jc`，选「服务状态」。检查五协议服务是否运行。再运行 `ss -lntup`，核对安装向导列出的端口是否在本机监听。
+1. 运行 `singdeck`，选「服务状态」。检查五协议服务是否运行。再运行 `ss -lntup`，核对安装向导列出的端口是否在本机监听。
 2. 若本机已监听，从云服务商面板核对入站规则。REALITY、VMess 和 AnyTLS 用 TCP，Hysteria 2 和 TUIC 用 UDP。按安装向导显示的端口逐个检查。
 3. 若证书签发失败，检查域名 A 记录是否指向 VPS，公网 TCP 80 是否开放。运行 `journalctl -u caddy -n 50 --no-pager` 查看原因。若域名也有 AAAA 记录，确认对应 IPv6 的 TCP 80 同样可达。
 4. 若订阅下载失败，用浏览器打开菜单生成的 HTTPS 地址。匿名访问应要求认证。输入正确凭据后应能下载配置。分享排障信息前，删去节点链接、订阅密码和私钥。
