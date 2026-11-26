@@ -24,7 +24,11 @@ s=$(curl -4fsSL -m 25 "https://raw.githubusercontent.com/LauritzWu/jc-vps/$revis
   bash -c "$s" -- "$revision"
 ```
 
-开发版首页使用灰白两级配色，默认显示德牧侧脸、服务状态、证书和订阅。首页采用单列菜单，安装前 `1` 打开向导，安装后 `1` 查看部署概况。`2` 查看 sing-box 或 Caddy 日志，`8` 查本机 TLS 证书的主体、颁发者及有效期，`9` 校验服务端配置。可从「服务管理」重启或停止服务。字体由 SSH 终端选择，例如 Sarasa Term SC。`JC_THEME=light jc` 切换浅色配色，`JC_BANNER=plain jc` 使用文字标题，`NO_COLOR=1 jc` 关闭着色。完整卸载位于「系统工具 → 6 完整卸载」。
+开发版首页使用暖灰正文、陶土色强调和德牧侧脸。首页采用单列菜单，安装前 `1` 打开向导，安装后 `1` 查看部署概况。`2` 查看 sing-box 或 Caddy 日志，`8` 查本机 TLS 证书，`9` 校验服务端配置。可从「服务管理」重启或停止服务。
+
+每个普通编号菜单回车选择 `1`。确认提示统一显示 `[Y/N]`，支持大小写，回车确认。完整卸载位于「系统工具 → 6 完整卸载」，删除节点配置前的独立确认回车取消。
+
+终端字体和背景可在本地 SSH 客户端设置。可使用 Sarasa Term SC 13 pt 常规字重。深色背景可用 `#262520`，浅色背景可用 `#F5F1E8`。使用浅色背景时运行 `JC_THEME=light jc`，纯文字标题用 `JC_BANNER=plain jc`，关闭着色用 `NO_COLOR=1 jc`。
 
 **v1.4.0 实测**覆盖 Ubuntu 24.04 LTS 的公网 IPv4 安装与卸载、SSH 重连、UFW 规则归属、Fail2ban 封禁保留、五协议代理、公信证书签发、HTTPS 订阅认证和 HY2 换端口及回滚。公网 IPv6、证书自然续期及使用外部 REALITY 握手目标的 HTTPS 订阅仍待本版实测。
 

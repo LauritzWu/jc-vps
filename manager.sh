@@ -20,11 +20,6 @@ protocols=(tcp tcp udp udp tcp)
 node_types=(vless vmess hysteria2 tuic anytls)
 
 accent='' green='' yellow='' red='' reset=''
-if [[ -t 1 && "${TERM:-dumb}" != dumb && -z "${NO_COLOR:-}" ]]; then
-    accent=${JC_MENU_INK:-$'\033[37m'}
-    green=$accent; yellow=${JC_MENU_MUTED:-$accent}; red=$'\033[31m'
-    reset=$'\033[0m'${JC_MENU_INK:-}
-fi
 fail() { printf '%s操作未完成：%s%s\n' "$red" "$*" "$reset" >&2; exit 1; }
 cfg() { printf '/etc/%s/config.json' "$1"; }
 fetch() { curl -4 -fsSL --retry 2 --connect-timeout 8 --max-time 25 "$@"; }
@@ -837,7 +832,7 @@ change_five_port() {
 }
 
 change_five_address() {
-    local requested=$1 config dir old host bind domain answer uri old_uri label ext i link authority file scheme
+    local requested=$1 config dir old host bind domain uri old_uri label ext i link authority file scheme
     local links=() files=()
     config=$(cfg "$five")
     dir="$(dirname -- "$config")/profiles"
@@ -857,8 +852,7 @@ change_five_address() {
         fail '当前五协议监听未配置为所选地址族。请先配置相应监听，再刷新节点地址'
     printf '原节点地址 %s\n新节点地址 %s\n' "$old" "$host"
     printf '将更新链接及已发布订阅，请确认新地址可从公网访问。\n'
-    read -r -p '确认刷新？[y/N] ' answer || return 0
-    [[ $answer == [yY] ]] || { echo '已取消刷新。'; return; }
+    jc_confirm '确认刷新？' || { echo '已取消刷新。'; return; }
 
     mkdir "$scratch/address"
     mapfile -t links <"$dir/links.txt"
@@ -992,9 +986,7 @@ five_share() {
         mapfile -t links <"$dir/links.txt"
         if [[ ${1:-} == --v2rayn ]]; then
             echo '兼容链接会让 TUIC 和 AnyTLS 跳过服务器证书验证。请仅在确认风险后导入。'
-            local answer
-            read -r -p '生成兼容链接？[y/N] ' answer || return 0
-            [[ $answer == [yY] ]] || return 0
+            jc_confirm '生成兼容链接？' || return 0
             fingerprint=$(openssl x509 -in "$(dirname -- "$dir")/local-tls.crt" -outform DER |
                 sha256sum | cut -d' ' -f1) || fail '无法读取服务器证书指纹'
             links[2]="${links[2]%#*}&pinSHA256=$fingerprint#${links[2]##*#}"
@@ -1234,6 +1226,8 @@ case "$command_name" in --help|-h) help_text; exit 0;; esac
 if [[ $command_name == five-service ]]; then printf '%s\n' "$five"; exit 0; fi
 shift
 [[ $OSTYPE == linux* && $EUID == 0 ]] || fail '请在 Ubuntu/Debian VPS 的 root 会话中运行'
+source "$(dirname -- "${BASH_SOURCE[0]}")/lib/ui.sh"
+if [[ ${JC_MENU_ACTIVE:-} == 1 ]]; then jc_ui_theme menu; else jc_ui_theme command; fi
 if [[ $command_name == reality-probe ]]; then
     [[ $# == 1 || $# == 2 ]] || fail '缺少 REALITY 目标域名'
     valid_domain "$1"

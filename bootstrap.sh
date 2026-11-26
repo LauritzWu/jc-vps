@@ -38,7 +38,7 @@ if ! $installed; then
     dir=$(mktemp -d)
     trap 'rm -rf -- "$dir"' EXIT
     mkdir "$dir/lib"
-    for file in manager.sh client-template.json lib/firewall.sh lib/launcher.sh; do
+    for file in manager.sh client-template.json lib/firewall.sh lib/launcher.sh lib/ui.sh; do
         curl -4 -fsSL --retry 2 --connect-timeout 8 --max-time 25 "$source_url/$file" -o "$dir/$file"
     done
     if [[ -f ${BASH_SOURCE[0]:-} ]]; then
@@ -49,10 +49,11 @@ if ! $installed; then
     printf '%s\n' "$revision" >"$dir/revision"
 fi
 (cd "$dir" && sha256sum --status --strict -c <<'SHA256'
-cf0f737e005067f75cc0e0f9755948cfa26755a92ef2310a63a382e4f866010f  manager.sh
+0dd21e64a11495eb4fd0a3c0fd134eccb3066a0988716f52a639ff8bc6439bd8  manager.sh
 d96d8e1440c7b53ef47625820c77fe58c95a4ff0cef1f989d68c53ff099a7d7b  client-template.json
 6dc765ad0e22eeeeed7d8edda757b79ab6cd67a4756970762a2ccb6c1f7fab42  lib/firewall.sh
 d1c7f57d69da15af90ef773dbcab1b3dd2fb89f70c42675a89d9c73575a3ea04  lib/launcher.sh
+550794b3bd0299ac3f616441b8accfb8427f2396ee7e53844cd240634e0c8184  lib/ui.sh
 SHA256
 ) || { printf 'JC 程序校验失败，请重新安装该版本。\n' >&2; exit 1; }
 if [[ $action == --check ]]; then exit 0; fi
@@ -62,9 +63,10 @@ if [[ $action == --rollback ]]; then
     exit
 fi
 source "$dir/lib/firewall.sh"
+source "$dir/lib/ui.sh"
 
 duo() {
-    JC_MENU_INK=${ink:-} JC_MENU_MUTED=${muted:-} bash "$dir/manager.sh" "$@" </dev/tty
+    JC_MENU_ACTIVE=1 bash "$dir/manager.sh" "$@" </dev/tty
 }
 five_service=$(bash "$dir/manager.sh" five-service)
 
@@ -78,7 +80,7 @@ choose_preset_name() {
     shift
     local candidates=("$@")
     for i in "${!candidates[@]}"; do option "$((i + 1))" "${candidates[i]}"; done
-    choose 1
+    choose
     [[ $selection =~ ^[1-9]$ ]] && (( selection <= ${#candidates[@]} )) || return 1
     chosen_name=${candidates[selection-1]}
 }
@@ -94,7 +96,7 @@ choose_preset_reality() {
         for i in "${!candidates[@]}"; do option "$((i + 1))" "${candidates[i]}"; done
         option 9 '自动探测可用目标'
         while true; do
-            choose 9
+            choose
             case "$selection" in
                 0) return 1 ;;
                 9) preferred=''; break ;;
@@ -127,7 +129,7 @@ five_deployed() {
 }
 
 quick_install() {
-    local domain ip ports='' uuid version='' answer port protocol resolved reality_target='' target_index candidate
+    local domain ip ports='' uuid version='' port protocol resolved reality_target='' target_index candidate
     local mode=1 reality_sni='' preset_names='' preset_name automatic=false
     local reality_args=()
     local preset_values=() package_args=()
@@ -146,7 +148,7 @@ quick_install() {
     heading '1/5  官方内核'
     option 1 '使用已安装的官方内核；新机安装 APT 稳定版'
         option 2 '指定官方 APT 版本（运行中的 JC 服务会短暂重启）'
-    choose 1
+    choose
     case "$selection" in
         0) return 0 ;;
         1) ;;
@@ -160,7 +162,7 @@ quick_install() {
     heading '2/5  域名和证书'
     option 1 '自有域名与公信证书'
     option 2 '无自有域名 · 全自动自签'
-    choose 1
+    choose
     case "$selection" in
         0) return 0 ;;
         1|2) mode=$selection ;;
@@ -171,7 +173,7 @@ quick_install() {
         package_args=(--no-caddy)
         option 1 '全自动（优先 IPv4，失败时尝试 IPv6）'
         option 2 '高级调整（手动填写 IPv4 / IPv6，按协议选站点）'
-        choose 1
+        choose
         case "$selection" in
             0) return 0 ;;
             1)
@@ -203,7 +205,7 @@ quick_install() {
         option 2 '从常用站点手动选择 REALITY 目标'
         option 3 '自动探测并选择常用 REALITY 目标'
         option 4 '手动输入其他 REALITY 目标域名'
-        choose 1
+        choose
         case "$selection" in
             0) return 0 ;;
             1) ;;
@@ -212,7 +214,7 @@ quick_install() {
                 for target_index in "${!reality_targets[@]}"; do
                     option "$((target_index + 1))" "${reality_targets[target_index]}"
                 done
-                choose 0
+                choose
                 case "$selection" in
                     0) return 0 ;;
                     [1-7]) reality_target=${reality_targets[selection-1]} ;;
@@ -258,7 +260,7 @@ quick_install() {
         heading '3/5  五协议端口'
         option 1 '自动选择五个可用端口'
         option 2 '手动指定五个端口'
-        choose 1
+        choose
         case "$selection" in
             0) return 0 ;;
             1|2) port_mode=$selection ;;
@@ -298,7 +300,7 @@ quick_install() {
         heading '4/5  节点凭据'
         option 1 '自动生成 UUID（回车默认）'
         option 2 '自定义 UUID'
-        choose 1
+        choose
         case "$selection" in
             0) return 0 ;;
             1) read -r uuid </proc/sys/kernel/random/uuid || return 1 ;;
@@ -330,7 +332,7 @@ quick_install() {
     duo firewall-status || return 1
     option 1 '智能管理本机 UFW（默认）'
     option 2 '手动管理防火墙'
-    choose 1
+    choose
     local JC_FIREWALL_MODE=smart
     case "$selection" in
         1) ;;
@@ -338,8 +340,7 @@ quick_install() {
         *) return 0 ;;
     esac
     export JC_FIREWALL_MODE
-    read -r -p "${yellow}开始安装？[Y/n，回车确认] $reset" answer </dev/tty || return 1
-    [[ ${answer:-y} == [yY] ]] || return 0
+    jc_confirm '开始安装？' </dev/tty || return 0
     if [[ $mode == 1 ]] && ! certificate_ready "$domain"; then
         resolved=$(timeout 5 getent ahosts "$domain" | awk '$2 == "STREAM" && !seen[$1]++ {print $1}') || resolved=''
         if [[ -z $resolved ]]; then
@@ -365,7 +366,7 @@ quick_install() {
         option 1 '生成 v2rayN 兼容链接和二维码（需确认）'
         option 2 '查看普通链接和公钥固定 JSON'
         option 3 '稍后查看'
-        choose 1
+        choose
         case "$selection" in
             1) duo five-share --v2rayn || return 1 ;;
             2) duo five-share || return 1 ;;
@@ -373,39 +374,18 @@ quick_install() {
     else
         option 1 '查看节点链接和配置文件（含凭据）'
         option 2 '稍后在客户端与订阅菜单查看'
-        choose 1
+        choose
         if [[ $selection == 1 ]]; then duo five-share || return 1; fi
     fi
 }
 
-ink='' muted='' red='' terminal_reset=''
-if [[ -t 1 && "${TERM:-dumb}" != dumb && -z "${NO_COLOR:-}" ]]; then
-    terminal_reset=$'\033[0m'
-    ink=$'\033[37m'
-    red=$'\033[31m'
-    if [[ ${JC_THEME:-dark} == light ]]; then ink=$'\033[30m'; fi
-    muted=$ink
-    if [[ ${COLORTERM:-} == truecolor || ${COLORTERM:-} == 24bit ]]; then
-        if [[ ${JC_THEME:-dark} == light ]]; then
-            ink=$'\033[38;2;52;50;47m'; muted=$'\033[38;2;107;104;99m'; red=$'\033[38;2;148;71;64m'
-        else
-            ink=$'\033[38;2;222;220;215m'; muted=$'\033[38;2;171;169;164m'; red=$'\033[38;2;216;154;146m'
-        fi
-    elif [[ $TERM == *256color* ]]; then
-        if [[ ${JC_THEME:-dark} == light ]]; then
-            ink=$'\033[38;5;235m'; muted=$'\033[38;5;241m'; red=$'\033[38;5;124m'
-        else
-            ink=$'\033[38;5;253m'; muted=$'\033[38;5;248m'; red=$'\033[38;5;174m'
-        fi
-    fi
-fi
-accent=$ink green=$ink yellow=$ink sketch=$muted reset=$terminal_reset$ink
+jc_ui_theme menu
 
 heading() { printf '\n%s%s%s\n' "$ink" "$1" "$reset"; }
 option() { printf ' %s%s%s  %s%s%s\n' "$accent" "$1" "$reset" "${3:-$ink}" "$2" "$reset"; }
 choose() {
-    read -r -p "${muted}请选择 [默认 $1，0 返回]：$reset" selection </dev/tty || exit 1
-    selection=${selection:-$1}
+    read -r -p "${muted}请选择 [回车默认 1，${1:-0 返回}]：$reset" selection </dev/tty || exit 1
+    selection=${selection:-1}
 }
 
 address_menu() {
@@ -414,7 +394,7 @@ address_menu() {
     option 1 '检测公网 IPv4'
     option 2 '检测公网 IPv6'
     option 3 '手动输入公网地址'
-    choose 0
+    choose
     case "$selection" in
         0) return ;;
         1) address=--ipv4 ;;
@@ -428,7 +408,7 @@ address_menu() {
 }
 
 client_menu() {
-    local default_option
+    local selection
     while true; do
         heading '客户端与订阅'
         option 1 '查看节点链接和配置文件'
@@ -440,12 +420,12 @@ client_menu() {
         elif [[ -s /etc/$five_service/config.json ]]; then
             option 6 '启用固定 HTTPS 订阅入口（TCP 8443）'
         fi
-        default_option=3
-        if [[ -s /etc/$five_service/profiles/links.txt ]]; then default_option=1; fi
-        choose "$default_option"
+        choose
         case "$selection" in
             0) return ;;
-            1) duo five-share || echo '请先完成五协议安装。' ;;
+            1)
+                if [[ -s /etc/$five_service/profiles/links.txt ]]; then duo five-share || true
+                else echo '请先完成五协议安装。'; fi ;;
             2) duo five-share --publish || echo '发布未完成，请检查上方信息。' ;;
             3) printf '%s\n' '导入五协议节点链接，或将 sing-box JSON 导入客户端。' \
                    '逐条切换为活动节点并打开网页，确认连接和出口地址。' ;;
@@ -464,7 +444,7 @@ firewall_menu() {
         option 2 '向已启用的 UFW 添加 TCP 80/443、UDP 443'
         option 3 '按协议指定单个端口或端口范围'
         option 4 '放开全部本机入站（需明确确认）'
-        choose 1
+        choose
         case "$selection" in
             0) return ;;
             3|4)
@@ -491,8 +471,7 @@ firewall_menu() {
                     echo '未发现正在运行的 UFW。请按实际防火墙和云平台配置处理。'
                     continue
                 fi
-                read -r -p '添加三条入站规则？[Y/N] ' answer </dev/tty || return
-                if [[ "$answer" == y || "$answer" == Y ]]; then
+                if jc_confirm '添加三条入站规则？' </dev/tty; then
                     ufw allow 80/tcp && ufw allow 443/tcp && ufw allow 443/udp && LC_ALL=C ufw status || true
                 fi ;;
             *) echo '无效选项。' ;;
@@ -506,7 +485,7 @@ core_menu() {
         option 1 '刷新并查看已安装版本和 APT 候选版本'
         option 2 '安装或升级官方稳定版'
         option 3 '安装指定的官方 APT 版本'
-        choose 1
+        choose
         case "$selection" in
             0) return ;;
             1) apt-get -o Acquire::ForceIPv4=true update && apt-cache policy sing-box || true ;;
@@ -514,11 +493,11 @@ core_menu() {
                 apt-cache madison sing-box || true
                 read -r -p '输入完整版本号（0 返回）：' version </dev/tty || return
                 [[ "$version" == 0 || -z "$version" ]] && continue
-                read -r -p '切换版本并重启运行中的 JC 服务（连接会短暂中断）？[Y/N] ' answer </dev/tty || return
-                if [[ "$answer" == y || "$answer" == Y ]]; then duo packages --restart-managed --version "$version" || true; fi ;;
+                if jc_confirm '切换版本并重启运行中的 JC 服务（连接会短暂中断）？' </dev/tty; then
+                    duo packages --restart-managed --version "$version" || true
+                fi ;;
             2)
-                read -r -p '安装或升级 APT 稳定版（运行中的 JC 服务会短暂重启）？[Y/N] ' answer </dev/tty || return
-                if [[ "$answer" == y || "$answer" == Y ]]; then
+                if jc_confirm '安装或升级 APT 稳定版（运行中的 JC 服务会短暂重启）？' </dev/tty; then
                     duo packages --restart-managed || true
                 fi ;;
             *) echo '无效选项。' ;;
@@ -554,13 +533,13 @@ init_tools() {
 }
 
 shortcut_menu() {
-    local target=/usr/local/bin/jc alias_path=/usr/local/bin/JC answer
+    local target=/usr/local/bin/jc alias_path=/usr/local/bin/JC
     local shortcuts=()
     while true; do
         heading '管理 JC 快捷命令'
         option 1 '安装 jc / JC 快捷命令'
         option 2 '卸载 jc / JC 快捷命令（节点服务继续运行）'
-        choose 1
+        choose
         case "$selection" in
             0) return ;;
             1) install_shortcut || true ;;
@@ -577,8 +556,7 @@ shortcut_menu() {
                     echo '未发现由 JC 安装的快捷命令。'
                     continue
                 fi
-                read -r -p '卸载 jc / JC 快捷命令？[Y/N] ' answer </dev/tty || return
-                if [[ $answer == [yY] ]]; then
+                if jc_confirm '卸载 jc / JC 快捷命令？' </dev/tty; then
                     rm -f -- "${shortcuts[@]}" && echo '快捷命令已卸载。'
                 fi ;;
             *) echo '无效选项。' ;;
@@ -697,7 +675,7 @@ logs_menu() {
         option 1 '最近 50 条 sing-box 日志'
         option 2 '实时跟随 sing-box 日志（Ctrl+C 返回）'
         option 3 '最近 50 条 Caddy 日志'
-        choose 0
+        choose
         case "$selection" in
             0) return ;;
             1) journalctl -u "$five_service.service" -n 50 --no-pager || true; pause_menu ;;
@@ -715,7 +693,7 @@ status_menu() {
         option 1 '查看服务状态和本机监听'
         option 2 '查看五协议最近 50 条运行日志'
         option 3 '实时跟随五协议日志（Ctrl+C 返回）'
-        choose 1
+        choose
         case "$selection" in
             0) return ;;
             1)
@@ -731,7 +709,7 @@ status_menu() {
 }
 
 service_menu() {
-    local selection answer kind port verb command
+    local selection kind port verb command
     local port_kinds=(reality vmess hy2 tuic anytls)
     while true; do
         heading '服务管理'
@@ -740,7 +718,7 @@ service_menu() {
         option 3 '更换单个五协议节点的端口'
         option 4 '重启五协议服务'
         option 5 '停止五协议服务'
-        choose 1
+        choose
         case "$selection" in
             0) return ;;
             1) systemctl start "$five_service" && echo '五协议服务已启动。' ;;
@@ -751,17 +729,15 @@ service_menu() {
                 option 3 'Hysteria 2 (UDP)'
                 option 4 'TUIC (UDP)'
                 option 5 'AnyTLS (TCP)'
-                choose 0
+                choose
                 [[ $selection == [1-5] ]] || continue
                 kind=${port_kinds[selection-1]}
                 read -r -p '新端口（0 返回）：' port </dev/tty || return
                 [[ $port != 0 ]] || continue
                 printf '请先在云防火墙放行新端口。应用时五协议服务会短暂重启。\n'
-                read -r -p '确认切换端口？[y/N] ' answer </dev/tty || return
-                if [[ $answer == [yY] ]]; then duo five-port "$kind" "$port" || true; fi ;;
+                if jc_confirm '确认切换端口？' </dev/tty; then duo five-port "$kind" "$port" || true; fi ;;
             2)
-                read -r -p '启用五协议开机自启？[y/N] ' answer </dev/tty || return
-                if [[ $answer == [yY] ]]; then
+                if jc_confirm '启用五协议开机自启？' </dev/tty; then
                     if systemctl is-active --quiet "$five_service"; then
                         systemctl enable "$five_service" && echo '已启用五协议开机自启。'
                     else echo '请先启动五协议服务。'; fi
@@ -770,15 +746,14 @@ service_menu() {
                 verb=重启 command=restart
                 if [[ $selection == 5 ]]; then verb=停止 command=stop; fi
                 printf '%s会中断节点连接，请确认当前 SSH 连接独立于这些节点。\n' "$verb"
-                read -r -p "确认${verb}？[y/N] " answer </dev/tty || return
-                if [[ $answer == [yY] ]]; then duo five-control "$command" || true; pause_menu; fi ;;
+                if jc_confirm "确认${verb}？" </dev/tty; then duo five-control "$command" || true; pause_menu; fi ;;
             *) echo '无效选项。' ;;
         esac
     done
 }
 
 tools_menu() {
-    local selection answer
+    local selection
     while true; do
         heading '系统工具'
         option 1 '查看或更新官方内核'
@@ -787,7 +762,7 @@ tools_menu() {
         option 4 '查看全部命令'
         option 5 '补齐快捷命令和基础组件'
         option 6 '完整卸载 sing-box 和 JC'
-        choose 1
+        choose
         case "$selection" in
             0) return ;;
             1) core_menu ;;
@@ -795,8 +770,7 @@ tools_menu() {
             3) set_region || true ;;
             4) duo --help ;;
             5)
-                read -r -p '补齐快捷命令和缺失的基础组件？[Y/N] ' answer </dev/tty || return
-                if [[ "$answer" == y || "$answer" == Y ]]; then init_tools || true; fi ;;
+                if jc_confirm '补齐快捷命令和缺失的基础组件？' </dev/tty; then init_tools || true; fi ;;
             6)
                 if duo uninstall; then
                     printf '\n%s\n' '如需装回本次运行的版本，请复制下面两行。' "revision=$revision" \
@@ -992,15 +966,7 @@ while true; do
     deployed=false
     if five_deployed; then deployed=true; fi
     home_menu "$deployed"
-    if $deployed; then
-        while true; do
-            read -r -p "${muted}输入菜单编号（0 退出）：$reset" selection </dev/tty || exit 1
-            [[ -n $selection ]] && break
-        done
-    else
-        read -r -p "${muted}请选择 [回车默认 1 安装，0 退出]：$reset" selection </dev/tty || exit 1
-        selection=${selection:-1}
-    fi
+    choose '0 退出'
     case "$selection" in
         1)
             if $deployed; then show_deployment

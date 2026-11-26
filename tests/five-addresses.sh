@@ -6,6 +6,7 @@ test_dir=$(mktemp -d)
 trap 'rm -rf -- "$test_dir"' EXIT
 source <(sed '/^command_name=/,$d' "$root/manager.sh")
 source "$root/lib/firewall.sh"
+source "$root/lib/ui.sh"
 fw_dir="$test_dir/firewall"
 fw_mode=manual
 template="$root/client-template.json"
@@ -217,9 +218,18 @@ done
 grep -F "$dir/local-tls.crt" <<<"$output" >/dev/null
 
 links_before=$(sha256sum "$dir/profiles/links.txt" "$dir/profiles/all.json")
-cancelled=$(five_share --v2rayn <<<n)
-[[ $cancelled != *'QR '* ]]
-output=$(five_share --v2rayn <<<y)
+for value in n N; do
+    cancelled=$(five_share --v2rayn <<<"$value")
+    [[ $cancelled != *'QR '* ]]
+done
+for value in y Y ''; do
+    output=$(five_share --v2rayn <<<"$value" 2>"$test_dir/confirm-prompt")
+    [[ $(grep -c '^QR ' <<<"$output") == 5 ]]
+    grep -Fq '[Y/N]（回车默认 Y）' "$test_dir/confirm-prompt"
+done
+jc_confirm '测试无效输入后确认？' <<< $'invalid\ny' 2>"$test_dir/confirm-prompt"
+grep -Fq '请输入 Y 或 N。' "$test_dir/confirm-prompt"
+if jc_confirm '测试输入已关闭？' </dev/null 2>/dev/null; then exit 1; fi
 fingerprint=$(openssl x509 -in "$dir/local-tls.crt" -outform DER | sha256sum | cut -d' ' -f1)
 [[ $(grep -c '^QR ' <<<"$output") == 5 ]]
 grep -Eq "^hysteria2://.*&pinSHA256=$fingerprint#" <<<"$output"
@@ -240,7 +250,7 @@ done
     option() { :; }
     choices=(1)
     choose() {
-        [[ $1 == 9 ]]
+        [[ $# == 0 ]]
         selection=${choices[0]}
         choices=("${choices[@]:1}")
     }
