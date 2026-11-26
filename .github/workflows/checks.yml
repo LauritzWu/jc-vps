@@ -15,7 +15,7 @@ jobs:
           for script in bootstrap.sh duo.sh manager.sh lib/{firewall,launcher,ui}.sh tests/*.sh; do
             bash -n "$script"
           done
-          shellcheck --severity=error bootstrap.sh duo.sh manager.sh lib/{firewall,launcher,ui}.sh tests/{firewall,firewall-ufw,launcher,fixed-subscription}.sh
+          shellcheck --severity=error bootstrap.sh duo.sh manager.sh lib/{firewall,launcher,ui}.sh tests/{firewall,firewall-ufw,launcher,fixed-subscription,fixed-subscription-caddy}.sh
           bash duo.sh --help
           if bash bootstrap.sh invalid; then
             echo 'Bootstrap accepted an invalid revision'
@@ -35,6 +35,13 @@ jobs:
         run: sudo bash tests/offline-menu.sh
       - name: Check fixed subscription URL and legacy migration
         run: bash tests/fixed-subscription.sh
+      - name: Check fixed subscription with real Caddy and HTTPS
+        run: |
+          if ! command -v caddy >/dev/null || ! getent group caddy >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y caddy
+          fi
+          sudo unshare --net bash tests/fixed-subscription-caddy.sh
       - name: Simulate package update and rollback
         run: bash tests/upgrade.sh
       - name: Check IPv4 and IPv6 node generation
