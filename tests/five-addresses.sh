@@ -158,6 +158,13 @@ sed -i '/^    bind 127\.0\.0\.1$/d' "$caddyfile"
 summary=$(five_summary)
 grep -Eq 'REALITY +TCP 443 +SNI: www\.microsoft\.com' <<<"$summary"
 grep -F '已发布 · TCP 8443（固定入口）' <<<"$summary" >/dev/null
+brief=$(five_summary --brief)
+grep -F '已发布（固定入口）' <<<"$brief" >/dev/null
+grep -F '距到期约' <<<"$brief" >/dev/null
+if grep -Eq 'TCP|SNI|28443' <<<"$brief"; then
+    echo 'The home summary displayed node details' >&2
+    exit 1
+fi
 rm -- "$profiles/five/all.sub"
 grep -F '未发布' <<<"$(five_summary)" >/dev/null
 

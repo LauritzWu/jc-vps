@@ -49,7 +49,7 @@ if ! $installed; then
     printf '%s\n' "$revision" >"$dir/revision"
 fi
 (cd "$dir" && sha256sum --status --strict -c <<'SHA256'
-a7ef3e77789d6799d37be434b9144deba2912c9428ba464e1ded91699a825e85  manager.sh
+9ed7a0de648bc25cefadbd1bd19c8fed0b970fa5d3b5753ea21a99ece8280612  manager.sh
 d96d8e1440c7b53ef47625820c77fe58c95a4ff0cef1f989d68c53ff099a7d7b  client-template.json
 6dc765ad0e22eeeeed7d8edda757b79ab6cd67a4756970762a2ccb6c1f7fab42  lib/firewall.sh
 d1c7f57d69da15af90ef773dbcab1b3dd2fb89f70c42675a89d9c73575a3ea04  lib/launcher.sh
@@ -378,14 +378,22 @@ quick_install() {
     fi
 }
 
+accent='' green='' yellow='' red='' reset=''
 if [[ -t 1 && "${TERM:-dumb}" != dumb && -z "${NO_COLOR:-}" ]]; then
-    accent=$'\033[1;36m'; green=$'\033[1;32m'; yellow=$'\033[1;33m'; red=$'\033[1;31m'; reset=$'\033[0m'
-else
-    accent=''; green=''; yellow=''; red=''; reset=''
+    accent=$'\033[1;33m'; green=$'\033[32m'; yellow=$'\033[33m'; red=$'\033[31m'; reset=$'\033[0m'
+    if [[ ${COLORTERM:-} == truecolor || ${COLORTERM:-} == 24bit ]]; then
+        if [[ ${JC_THEME:-dark} == light ]]; then
+            accent=$'\033[1;38;2;128;85;46m'; green=$'\033[38;2;58;97;64m'
+            yellow=$'\033[38;2;132;85;19m'; red=$'\033[38;2;152;63;55m'
+        else
+            accent=$'\033[1;38;2;226;189;146m'; green=$'\033[38;2;169;199;160m'
+            yellow=$'\033[38;2;233;190;117m'; red=$'\033[38;2;236;163;152m'
+        fi
+    fi
 fi
 
 heading() { printf '\n%s%s%s\n' "$accent" "$1" "$reset"; }
-option() { printf ' %s%s.%s %s%s%s\n' "$green" "$1" "$reset" "${3:-$accent}" "$2" "$reset"; }
+option() { printf ' %s%s%s  %s%s%s\n' "$accent" "$1" "$reset" "${3:-}" "$2" "$reset"; }
 choose() {
     read -r -p "${yellow}请选择 [默认 $1，0 返回]：$reset" selection </dev/tty || exit 1
     selection=${selection:-$1}
@@ -615,14 +623,35 @@ detect_region() {
 }
 
 vps_summary() {
-    local os ipv4 ipv6 region kernel state autostart
+    local mode=$1 os ipv4 ipv6 region kernel state autostart state_color
     os=$(awk -F= '$1=="PRETTY_NAME" {print substr($0,index($0,"=")+1); exit}' /etc/os-release 2>/dev/null || true)
     os=${os#\"}; os=${os%\"}
-    ipv4=$(ip -o -4 addr show scope global 2>/dev/null | awk '{sub(/\/.*/,"",$4); printf "%s%s", sep,$4; sep="  "}' || true)
-    ipv6=$(ip -o -6 addr show scope global 2>/dev/null | awk '$0 !~ / tentative | dadfailed / {sub(/\/.*/,"",$4); printf "%s%s",sep,$4; sep="  "}' || true)
+    state='未安装'
+    state_color=''
+    autostart=''
+    if systemctl is-active --quiet "$five_service" 2>/dev/null; then
+        state='运行中'
+        state_color=$green
+    elif [[ -s /etc/$five_service/config.json ]]; then
+        state='未运行'
+        state_color=$yellow
+    fi
+    if [[ $state != 未安装 ]]; then
+        autostart=' · 开机自启未启用'
+        if systemctl is-enabled --quiet "$five_service" 2>/dev/null; then autostart=' · 开机自启'; fi
+    fi
+
+    if [[ $mode == brief ]]; then
+        printf ' %s\n' "${os:-系统未知}"
+        printf ' sing-box     %s%s%s%s\n' "$state_color" "$state" "$reset" "$autostart"
+        return
+    fi
+
     region=''
     if [[ -r "$region_file" ]]; then IFS= read -r region < "$region_file" || true
     elif [[ -r "$legacy_region_file" ]]; then IFS= read -r region < "$legacy_region_file" || true; fi
+    ipv4=$(ip -o -4 addr show scope global 2>/dev/null | awk '{sub(/\/.*/,"",$4); printf "%s%s", sep,$4; sep="  "}' || true)
+    ipv6=$(ip -o -6 addr show scope global 2>/dev/null | awk '$0 !~ / tentative | dadfailed / {sub(/\/.*/,"",$4); printf "%s%s",sep,$4; sep="  "}' || true)
     if [[ -z "$region" ]]; then region=$(detect_region "$ipv4 | $ipv6"); fi
     region=$(printf '%s' "$region" | tr -d '[:cntrl:]')
     kernel=''
@@ -630,23 +659,12 @@ vps_summary() {
         kernel=$(/usr/bin/sing-box version 2>/dev/null | sed -n '1p' || true)
         kernel=${kernel#sing-box version }
     fi
-    state='未安装'
-    if systemctl is-active --quiet "$five_service" 2>/dev/null; then
-        state='运行中'
-    elif [[ -s /etc/$five_service/config.json ]]; then
-        state='未运行'
-    fi
     heading 'VPS 概况'
     printf ' 主机  %s    系统  %s\n' "$(hostname)" "${os:-未知}"
     printf ' Linux %s    架构  %s    sing-box  %s\n' "$(uname -r)" "$(uname -m)" "${kernel:-未检测到}"
     printf ' IPv4  %s\n IPv6  %s\n' "${ipv4:-未检测到}" "${ipv6:-未检测到}"
-    printf ' 地区  %s\n 服务  五协议 %s' "${region:-未能识别（系统工具可手动覆盖）}" "$state"
-    if [[ $state != 未安装 ]]; then
-        autostart='未启用'
-        if systemctl is-enabled --quiet "$five_service" 2>/dev/null; then autostart='已启用'; fi
-        printf ' · 开机自启%s' "$autostart"
-    fi
-    printf '\n'
+    printf ' 地区  %s\n 服务  五协议 %s%s%s%s\n' "${region:-未能识别（系统工具可手动覆盖）}" \
+        "$state_color" "$state" "$reset" "$autostart"
 }
 
 status_menu() {
@@ -659,7 +677,15 @@ status_menu() {
         choose 1
         case "$selection" in
             0) return ;;
-            1) duo status || true ;;
+            1)
+                vps_summary detail
+                if [[ -s /etc/$five_service/config.json ]]; then
+                    heading '五协议节点 · 配置端口'
+                    duo five-summary || true
+                fi
+                heading '本机监听'
+                duo status || true
+                pause_menu ;;
             2) journalctl -u "$five_service.service" -n 50 --no-pager || true ;;
             3)
                 trap ':' INT
@@ -710,6 +736,7 @@ service_menu() {
 }
 
 tools_menu() {
+    local selection answer
     while true; do
         heading '系统工具'
         option 1 '查看或更新官方内核'
@@ -717,6 +744,7 @@ tools_menu() {
         option 3 '手动覆盖服务器地区'
         option 4 '查看全部命令'
         option 5 '补齐快捷命令和基础组件'
+        option 6 '完整卸载 sing-box 和 JC' "$red"
         choose 1
         case "$selection" in
             0) return ;;
@@ -727,6 +755,12 @@ tools_menu() {
             5)
                 read -r -p '补齐快捷命令和缺失的基础组件？[Y/N] ' answer </dev/tty || return
                 if [[ "$answer" == y || "$answer" == Y ]]; then init_tools || true; fi ;;
+            6)
+                if duo uninstall; then
+                    printf '\n%s\n' '如需装回本次运行的版本，请复制下面两行。' "revision=$revision" \
+                        's=$(curl -4fsSL -m 25 "https://raw.githubusercontent.com/LauritzWu/jc-vps/$revision/bootstrap.sh") && bash -c "$s" -- "$revision"'
+                    exit 0
+                fi ;;
             *) echo '无效选项。' ;;
         esac
     done
@@ -736,24 +770,18 @@ home_width() {
     local size rows columns
     size=$(stty size 2>/dev/null </dev/tty) || size=''
     read -r rows columns <<< "$size"
-    columns=${columns:-${COLUMNS:-80}}
+    [[ "$columns" =~ ^[1-9][0-9]{0,3}$ ]] || columns=${COLUMNS:-80}
     [[ "$columns" =~ ^[1-9][0-9]{0,3}$ ]] || columns=80
     if (( columns > 104 )); then columns=104; fi
     printf '%s' "$columns"
 }
 
-home_rule() {
-    local padding
-    printf -v padding '%*s' "$1" ''
-    printf '%s%s%s\n' "$accent" "${padding// /─}" "$reset"
-}
-
 home_banner() {
     printf '\n'
-    home_rule "$1"
-    printf '%s' "$accent"
-    if (( $1 >= 78 )); then
-        cat <<'SHEPHERD'
+    if [[ ${JC_BANNER:-} == full ]] && (( $1 >= 48 )); then
+        printf '%s' "$accent"
+        if (( $1 >= 78 )); then
+            cat <<'SHEPHERD'
            /\                 /\
           /  \               /  \
          / /\ \_____________/ /\ \
@@ -767,19 +795,41 @@ home_banner() {
                                           JC
                                           GERMAN SHEPHERD EDITION
 SHEPHERD
-    elif (( $1 >= 48 )); then
-        cat <<'SHEPHERD'
+        else
+            cat <<'SHEPHERD'
        /\       /\
       /  \_____/  \
      /  ●       ●  \
      \      ▼      /    JC
       \____/ \____/     German Shepherd Edition
 SHEPHERD
-    else
-        printf '%s\n' '  /\___/\' ' ( ^ Y ^ )' '  JC'
+        fi
+        printf '%s\n' "$reset"
     fi
-    printf '%s' "$reset"
-    home_rule "$1"
+    printf ' %sJC%s · VPS 管理\n\n' "$accent" "$reset"
+}
+
+home_pair() {
+    local width=$1 left=$2 left_text=$3 right=$4 right_text=$5
+    if (( width >= 80 )); then
+        local LC_ALL=C.UTF-8
+        # The labels in the left column contain only CJK characters.
+        printf ' %s%s%s  %s%*s%s%s%s  %s\n' "$accent" "$left" "$reset" "$left_text" \
+            "$((24 - 2 * ${#left_text}))" '' "$accent" "$right" "$reset" "$right_text"
+    else
+        option "$left" "$left_text"
+        option "$right" "$right_text"
+    fi
+}
+
+home_menu() {
+    local width=$1 deployed=$2
+    printf '\n'
+    if ! $deployed; then option 1 '一键安装 sing-box' "$green"; fi
+    home_pair "$width" 3 '服务状态' 4 '服务管理'
+    home_pair "$width" 5 '客户端与订阅' 6 '网络与防火墙'
+    home_pair "$width" 7 '系统工具' 0 '退出'
+    printf '\n'
 }
 
 if ! $installed; then init_tools; fi
@@ -787,33 +837,16 @@ if ! $installed; then init_tools; fi
 while true; do
     width=$(home_width)
     home_banner "$width"
-    heading '管理菜单'
     deployed=false
-    if five_deployed; then
-        deployed=true
-        option 1 '一键安装 sing-box（五协议已部署）' "$green"
-    else
-        option 1 '一键安装 sing-box' "$green"
-    fi
-    option 2 '完整卸载 sing-box 和 JC' "$red"
-    option 3 '服务状态'
-    option 4 '服务管理'
-    option 5 '客户端与订阅'
-    option 6 '网络与防火墙'
-    option 7 '系统工具'
-    option 0 '退出'
-    home_rule "$width"
-    vps_summary
+    if five_deployed; then deployed=true; fi
+    vps_summary brief
     if [[ -s /etc/$five_service/config.json ]]; then
-        heading '五协议节点 · 配置端口'
-        duo five-summary || true
-    elif ! $deployed; then
-        printf '%s尚未部署 JC 节点，按 1 或回车安装。%s\n' "$yellow" "$reset"
+        duo five-summary --brief || true
     fi
-    home_rule "$width"
+    home_menu "$width" "$deployed"
     if $deployed; then
         while true; do
-            read -r -p "${yellow}请输入序号 [0–7]：$reset" selection </dev/tty || exit 1
+            read -r -p "${yellow}输入菜单编号（0 退出）：$reset" selection </dev/tty || exit 1
             [[ -n $selection ]] && break
         done
     else
@@ -824,12 +857,7 @@ while true; do
         1)
             quick_install || echo '安装未完成，请查看上面的报错。'
             pause_menu ;;
-        2)
-            if duo uninstall; then
-                printf '\n%s\n' '如需装回本次运行的版本，请复制下面两行。' "revision=$revision" \
-                    's=$(curl -4fsSL -m 25 "https://raw.githubusercontent.com/LauritzWu/jc-vps/$revision/bootstrap.sh") && bash -c "$s" -- "$revision"'
-                exit 0
-            fi ;;
+        2) printf '%s\n' '完整卸载已移至「系统工具 → 6 完整卸载」。'; tools_menu ;;
         3) status_menu ;;
         4) service_menu ;;
         5) client_menu ;;

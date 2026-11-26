@@ -1099,22 +1099,24 @@ CADDY
 }
 
 five_summary() {
-    local config rows domain cert expiry now port handshake block
+    local brief=${1:-} config rows domain cert expiry now days cert_color='' port handshake block
     config=$(cfg "$five")
-    rows=$(jq -er '
-        {"vless":"REALITY","vmess":"VMess WS","hysteria2":"Hysteria 2","tuic":"TUIC","anytls":"AnyTLS"} as $names |
-        .inbounds[] | select($names[.type] and (.listen_port | type == "number")) |
-        [$names[.type], (if .type == "hysteria2" or .type == "tuic" then "UDP" else "TCP" end),
-         .listen_port, (if .type == "vless" then
-            (.tls.server_name // "" | select(test("^[A-Za-z0-9.-]*$")))
-         else "" end)] | @tsv
-    ' "$config" 2>/dev/null) || { echo ' 无法读取五协议节点配置。'; return; }
-    local name transport sni
-    while IFS=$'\t' read -r name transport port sni; do
-        printf ' %-12s %s %s' "$name" "$transport" "$port"
-        if [[ -n $sni ]]; then printf '   SNI: %s' "$sni"; fi
-        printf '\n'
-    done <<<"$rows"
+    if [[ $brief != --brief ]]; then
+        rows=$(jq -er '
+            {"vless":"REALITY","vmess":"VMess WS","hysteria2":"Hysteria 2","tuic":"TUIC","anytls":"AnyTLS"} as $names |
+            .inbounds[] | select($names[.type] and (.listen_port | type == "number")) |
+            [$names[.type], (if .type == "hysteria2" or .type == "tuic" then "UDP" else "TCP" end),
+             .listen_port, (if .type == "vless" then
+                (.tls.server_name // "" | select(test("^[A-Za-z0-9.-]*$")))
+             else "" end)] | @tsv
+        ' "$config" 2>/dev/null) || { echo ' 无法读取五协议节点配置。'; return; }
+        local name transport sni
+        while IFS=$'\t' read -r name transport port sni; do
+            printf ' %-12s %s %s' "$name" "$transport" "$port"
+            if [[ -n $sni ]]; then printf '   SNI: %s' "$sni"; fi
+            printf '\n'
+        done <<<"$rows"
+    fi
 
     domain=$(jq -r '.inbounds[] | select(.type=="vmess") | .tls.server_name // empty' "$config")
     cert=$(jq -r '.inbounds[] | select(.type=="hysteria2") | .tls.certificate_path // empty' "$config")
@@ -1122,9 +1124,11 @@ five_summary() {
         expiry=$(date -u -d "${expiry#notAfter=}" +%s 2>/dev/null); then
         now=$(date -u +%s)
         if (( expiry <= now )); then
-            echo ' TLS 证书     已过期'
+            printf ' TLS 证书     %s已过期%s\n' "$red" "$reset"
         else
-            printf ' TLS 证书     距到期约 %s 天\n' "$(( (expiry - now + 86399) / 86400 ))"
+            days=$(( (expiry - now + 86399) / 86400 ))
+            if (( days <= 14 )); then cert_color=$yellow; fi
+            printf ' TLS 证书     %s距到期约 %s 天%s\n' "$cert_color" "$days" "$reset"
         fi
     else
         echo ' TLS 证书     无法读取有效期'
@@ -1139,9 +1143,17 @@ five_summary() {
         port=$(jq -r '.inbounds[] | select(.type=="vless") | .listen_port' "$config")
         handshake=$(jq -r '.inbounds[] | select(.type=="vless") | .tls.reality.handshake.server' "$config")
         if fixed_subscription_block "$block"; then
-            printf ' HTTPS 订阅   已发布 · TCP 8443（固定入口）\n'
+            if [[ $brief == --brief ]]; then
+                printf ' HTTPS 订阅   已发布（固定入口）\n'
+            else
+                printf ' HTTPS 订阅   已发布 · TCP 8443（固定入口）\n'
+            fi
         elif [[ $handshake == 127.0.0.1 ]]; then
-            printf ' HTTPS 订阅   已发布 · TCP %s\n' "$port"
+            if [[ $brief == --brief ]]; then
+                printf ' HTTPS 订阅   已发布\n'
+            else
+                printf ' HTTPS 订阅   已发布 · TCP %s\n' "$port"
+            fi
         else
             echo ' HTTPS 订阅   固定入口未启用'
         fi
@@ -1183,7 +1195,11 @@ if [[ $command_name == detect-address ]]; then
     detect_public_address "$1"
     exit
 fi
-if [[ $command_name == five-summary ]]; then five_summary; exit; fi
+if [[ $command_name == five-summary ]]; then
+    [[ $# == 0 || ( $# == 1 && $1 == --brief ) ]] || fail '用法 five-summary [--brief]'
+    five_summary "$@"
+    exit
+fi
 exec 9>/run/lock/sing-box-yg-plus.lock
 flock -n 9 || fail '另一个 JC 操作正在运行'
 scratch=$(mktemp -d)
