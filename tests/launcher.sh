@@ -41,4 +41,18 @@ if jc_install_launcher "$root/rejected" false; then exit 1; fi
 "$jc_launcher" --rollback
 [[ $("$jc_launcher") == two ]]
 
-echo 'Local launcher migration, failed upgrade and rollback passed'
+source <(sed -n '/^install_shortcut() {$/,/^init_tools() {$/p' bootstrap.sh | sed '$d')
+dir="$root/two"
+installed=false
+install_shortcut
+[[ $(readlink -- "$root/singdeck") == jc && $(readlink -- "$root/JC") == jc ]]
+[[ $("$root/singdeck") == two && $("$root/JC") == two ]]
+install_shortcut
+
+rm -- "$root/singdeck"
+printf '%s\n' 'unrelated command' >"$root/singdeck"
+if install_shortcut; then exit 1; fi
+grep -qxF 'unrelated command' "$root/singdeck"
+[[ $("$jc_launcher") == two ]]
+
+echo 'Local launcher migration, failed upgrade, rollback and SingDeck aliases passed'

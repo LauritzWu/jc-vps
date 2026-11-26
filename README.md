@@ -1,4 +1,4 @@
-# JC · sing-box VPS 管理工具
+# SingDeck · sing-box VPS 管理工具
 
 面向个人 VPS 的 sing-box 管理工具。使用官方 APT 版 sing-box，提供五协议安装向导，支持选择 IPv4 或 IPv6 节点地址，并可发布带密码的 HTTPS 订阅。
 
@@ -15,6 +15,8 @@ s=$(curl -4fsSL -m 25 "https://raw.githubusercontent.com/LauritzWu/jc-vps/$revis
 新部署可选「1 一键安装 sing-box」或直接回车。已有部署运行上述命令即可更新管理入口，节点无需重装。详见 [v1.5.0 发布说明](https://github.com/LauritzWu/jc-vps/releases/tag/v1.5.0)。
 
 ### 本地管理与终端菜单
+
+SingDeck 原名 JC。包含 SingDeck 品牌更新的版本可用 `singdeck` 打开菜单，也可继续使用 `jc` 或 `JC`。上面标注的 v1.5.0 正式版仍使用原有命令。
 
 安装入口会校验脚本、模板和模块，再将它们安装到 `/usr/local/lib/jc`，之后 `jc` 从本地打开菜单，查看状态和日志时无需访问 GitHub。仍可在「系统工具」手动补齐工具依赖。从第二个本地版本起，运行 `jc --rollback` 可切回上一个已安装的管理入口。
 

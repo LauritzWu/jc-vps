@@ -38,7 +38,8 @@ done
 grep -Fq '1  一键安装 sing-box' "$test_dir/wide"
 grep -Fq '1  部署概况' "$test_dir/deployed"
 grep -Eq '3  服务状态[[:space:]]*$' "$test_dir/wide"
-grep -Fq 'GERMAN SHEPHERD EDITION' "$test_dir/wide"
+grep -Fq 'SingDeck' "$test_dir/wide"
+grep -Fq 'SingDeck' "$test_dir/narrow"
 grep -Fq '⢠⣶⣄' "$test_dir/wide"
 grep -Fq '⣴⣦' "$test_dir/narrow"
 if grep -Eq '完整卸载|IPv6' "$test_dir/wide" || grep -Fq $'\033[' "$test_dir/wide"; then
@@ -47,7 +48,7 @@ fi
 
 run_menu 96 $'2\n0\n7\n0\n0' >"$test_dir/tools"
 grep -Fq '3  最近 50 条 Caddy 日志' "$test_dir/tools"
-grep -Fq '6  完整卸载 sing-box 和 JC' "$test_dir/tools"
+grep -Fq '6  完整卸载 sing-box 和 SingDeck' "$test_dir/tools"
 
 run_menu 96 $'\n0\n\n0' >"$test_dir/default-one"
 grep -Fq '回车默认 1，0 退出' "$test_dir/default-one"
@@ -68,12 +69,12 @@ grep -Fq $'\033[38;2;181;174;162m' "$test_dir/dark"
 grep -Fq $'\033[38;2;212;150;125m' "$test_dir/dark"
 
 JC_BANNER=plain run_menu 96 0 >"$test_dir/plain"
-grep -Fq 'JC · VPS 管理' "$test_dir/plain"
-if grep -Fq 'GERMAN SHEPHERD EDITION' "$test_dir/plain"; then exit 1; fi
+grep -Fq 'SingDeck · VPS 管理' "$test_dir/plain"
+if grep -Fq '⢠⣶⣄' "$test_dir/plain"; then exit 1; fi
 [[ ! -e $JC_NETWORK_LOG ]]
 
-printf '\n%s\n' 'JC home · 96 columns'
+printf '\n%s\n' 'SingDeck home · 96 columns'
 cat "$test_dir/wide"
-printf '\n%s\n' 'JC home · 48 columns'
+printf '\n%s\n' 'SingDeck home · 48 columns'
 cat "$test_dir/narrow"
 echo 'Offline menu width, shortcuts, banner and colors passed'
