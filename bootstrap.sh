@@ -2,40 +2,71 @@
 set -euo pipefail
 umask 077
 
-revision=${1:-main}
-if (( $# > 1 )) || [[ $revision != main && ! $revision =~ ^[0-9a-f]{40}$ ]]; then
+installed=false
+action=''
+if [[ ${1:-} == --installed ]]; then
+    installed=true
+    shift
+    action=${1:-}
+    if (( $# > 1 )) || [[ -n $action && $action != --check && $action != --rollback ]]; then
+        printf '用法：jc [--rollback]\n' >&2
+        exit 2
+    fi
+    dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+    IFS= read -r revision <"$dir/revision"
+else
+    revision=${1:-main}
+    if (( $# > 1 )); then
+        printf '用法：bootstrap.sh [完整 Git 提交 SHA]\n' >&2
+        exit 2
+    fi
+fi
+if [[ $revision != main && ! $revision =~ ^[0-9a-f]{40}$ ]]; then
     printf '用法：bootstrap.sh [完整 Git 提交 SHA]\n' >&2
     exit 2
 fi
 
 if (( EUID != 0 )); then printf '请在 VPS 的 root 会话中运行。\n' >&2; exit 1; fi
-for dependency in curl; do
-    if ! command -v "$dependency" >/dev/null; then
-        printf '缺少依赖：%s\n' "$dependency" >&2
+
+if ! $installed; then
+    if ! command -v curl >/dev/null; then
+        printf '缺少依赖：curl\n' >&2
         exit 1
     fi
-done
-
-printf '正在下载 JC 程序与模板（%s）…\n' "$revision"
-source_url="https://raw.githubusercontent.com/LauritzWu/jc-vps/$revision"
-dir=$(mktemp -d)
-mkdir "$dir/lib"
-trap 'rm -f "$dir/manager.sh" "$dir/client-template.json" "$dir/lib/firewall.sh"; rmdir "$dir/lib" "$dir"' EXIT
-for file in manager.sh client-template.json lib/firewall.sh; do
-    curl -4 -fsSL --retry 2 --connect-timeout 8 --max-time 25 "$source_url/$file" -o "$dir/$file"
-done
-(cd "$dir" && sha256sum -c <<'SHA256'
-a2ffbf22224f970e0ab10c388ed3ab44caff47bf4419fa4f202331a5b867e1b4  manager.sh
+    printf '正在下载 JC 程序与模板（%s）…\n' "$revision"
+    source_url="https://raw.githubusercontent.com/LauritzWu/jc-vps/$revision"
+    dir=$(mktemp -d)
+    trap 'rm -rf -- "$dir"' EXIT
+    mkdir "$dir/lib"
+    for file in manager.sh client-template.json lib/firewall.sh lib/launcher.sh; do
+        curl -4 -fsSL --retry 2 --connect-timeout 8 --max-time 25 "$source_url/$file" -o "$dir/$file"
+    done
+    if [[ -f ${BASH_SOURCE[0]:-} ]]; then
+        cp -- "${BASH_SOURCE[0]}" "$dir/bootstrap.sh"
+    else
+        curl -4 -fsSL --retry 2 --connect-timeout 8 --max-time 25 "$source_url/bootstrap.sh" -o "$dir/bootstrap.sh"
+    fi
+    printf '%s\n' "$revision" >"$dir/revision"
+fi
+(cd "$dir" && sha256sum --status --strict -c <<'SHA256'
+c219a7e382236606d9c3532f8f9714b3fdb07bea94faef0961d34f62977b9ac4  manager.sh
 d96d8e1440c7b53ef47625820c77fe58c95a4ff0cef1f989d68c53ff099a7d7b  client-template.json
 6dc765ad0e22eeeeed7d8edda757b79ab6cd67a4756970762a2ccb6c1f7fab42  lib/firewall.sh
+d1c7f57d69da15af90ef773dbcab1b3dd2fb89f70c42675a89d9c73575a3ea04  lib/launcher.sh
 SHA256
-)
+) || { printf 'JC 程序校验失败，请重新安装该版本。\n' >&2; exit 1; }
+if [[ $action == --check ]]; then exit 0; fi
+source "$dir/lib/launcher.sh"
+if [[ $action == --rollback ]]; then
+    jc_switch_bundle --rollback
+    exit
+fi
 source "$dir/lib/firewall.sh"
 
 duo() {
     bash "$dir/manager.sh" "$@" </dev/tty
 }
-five_service=$(duo five-service)
+five_service=$(bash "$dir/manager.sh" five-service)
 
 pause_menu() {
     read -r -p '按回车返回菜单：' </dev/tty || true
@@ -387,7 +418,11 @@ client_menu() {
         option 2 '发布五协议单节点及聚合订阅'
         option 3 '查看五协议客户端验收步骤'
         option 4 '刷新节点地址（IPv4 / IPv6）'
-        if [[ -s /etc/$five_service/local-tls.crt ]]; then option 5 'v2rayN 兼容链接与二维码（自签模式）'; fi
+        if [[ -s /etc/$five_service/local-tls.crt ]]; then
+            option 5 'v2rayN 兼容链接与二维码（自签模式）'
+        elif [[ -s /etc/$five_service/config.json ]]; then
+            option 6 '启用固定 HTTPS 订阅入口（TCP 8443）'
+        fi
         default_option=3
         if [[ -s /etc/$five_service/profiles/links.txt ]]; then default_option=1; fi
         choose "$default_option"
@@ -399,6 +434,7 @@ client_menu() {
                    '逐条切换为活动节点并打开网页，确认连接和出口地址。' ;;
             4) address_menu ;;
             5) duo five-share --v2rayn || true ;;
+            6) duo five-share --publish --fixed || echo '固定入口未启用，请检查上方信息。' ;;
             *) echo '无效选项。' ;;
         esac
     done
@@ -473,39 +509,9 @@ core_menu() {
     done
 }
 
-install_lowercase_shortcut() {
-    local target=/usr/local/bin/jc temp
-    if [[ -e "$target" || -L "$target" ]]; then
-        if [[ -f "$target" && ! -L "$target" && -x "$target" ]] &&
-            grep -qxF -e '# Managed by JC' -e '# Managed by Lauritz Duo' "$target"; then
-            if grep -qxF "revision=$revision" "$target"; then
-                echo 'jc 快捷命令已安装。'
-                return 0
-            fi
-        else
-            echo '发现其他程序使用 /usr/local/bin/jc，保留原文件。' >&2
-            return 1
-        fi
-    fi
-    temp=$(mktemp /usr/local/bin/.jc.XXXXXX) || return 1
-    if ! {
-        printf '%s\n' '#!/usr/bin/env bash' '# Managed by JC' 'set -eu' "revision=$revision"
-        cat <<'DUOSH'
-f=$(mktemp)
-trap 'rm -f "$f"' EXIT
-curl -4 -fsSL --connect-timeout 8 --max-time 25 "https://raw.githubusercontent.com/LauritzWu/jc-vps/$revision/bootstrap.sh" -o "$f"
-bash "$f" "$revision"
-DUOSH
-    } > "$temp" || ! chmod 0755 "$temp" || ! mv -fT -- "$temp" "$target"; then
-        rm -f -- "$temp"
-        return 1
-    fi
-    printf 'jc 快捷命令已安装（%s）。\n' "$revision"
-}
-
 install_shortcut() {
     local alias_path=/usr/local/bin/JC
-    install_lowercase_shortcut || return 1
+    jc_install_launcher "$dir" "$installed" || return 1
     if [[ -L $alias_path && $(readlink -- "$alias_path") == jc ]]; then
         return 0
     fi
@@ -649,11 +655,16 @@ status_menu() {
         heading '服务状态'
         option 1 '查看服务状态和本机监听'
         option 2 '查看五协议最近 50 条运行日志'
+        option 3 '实时跟随五协议日志（Ctrl+C 返回）'
         choose 1
         case "$selection" in
             0) return ;;
             1) duo status || true ;;
             2) journalctl -u "$five_service.service" -n 50 --no-pager || true ;;
+            3)
+                trap ':' INT
+                journalctl -u "$five_service.service" -n 20 --no-pager -f || true
+                trap - INT ;;
             *) echo '无效选项。' ;;
         esac
     done
@@ -771,7 +782,7 @@ SHEPHERD
     home_rule "$1"
 }
 
-init_tools
+if ! $installed; then init_tools; fi
 
 while true; do
     width=$(home_width)

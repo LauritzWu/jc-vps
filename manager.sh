@@ -211,6 +211,10 @@ uninstall() {
     done
     if [[ $package == 'install ok installed' ]]; then dpkg --no-act --remove sing-box; fi
     dirs+=("/etc/$five")
+    if [[ -d /usr/local/lib/jc && ! -L /usr/local/lib/jc &&
+          -f /usr/local/lib/jc/.managed-by-jc ]]; then
+        dirs+=("/usr/local/lib/jc")
+    fi
     if [[ -d $profiles && ! -L $profiles ]]; then
         if [[ -d $profiles/five && ! -L $profiles/five ]]; then
             for kind in "${kinds[@]}" all; do
@@ -456,6 +460,37 @@ profile_dir() {
 site_block() {
     awk -v marker="$1:8443 {" '$0 == marker {inside=1} inside {print} inside && /^}/ {exit}' "$caddyfile"
 }
+
+fixed_subscription_block() {
+    [[ $1 == *'handle_path /profiles/five/*'* ]] &&
+        ! grep -Eq '^[[:space:]]+bind([[:space:]]|$)' <<<"$1"
+}
+
+enable_fixed_subscription() {
+    local domain=$1 block bind_lines=''
+    caddy_port_available 8443
+    block=$(site_block "$domain")
+    if ! fixed_subscription_block "$block"; then
+        bind_lines=$(awk '$1 == "bind" { print }' <<<"$block")
+        [[ $bind_lines =~ ^[[:space:]]+bind[[:space:]]+127\.0\.0\.1[[:space:]]*$ ]] ||
+            fail '现有 Caddy 绑定配置需要手动核对，未更改固定订阅入口'
+    fi
+    fw_open 8443/tcp subscription || fail '无法管理 HTTPS 订阅的 UFW 规则'
+    if [[ -n $bind_lines ]]; then
+        awk -v marker="$domain:8443 {" '
+          $0 == marker {inside=1} inside && /^}/ {inside=0}
+          inside && /^[[:space:]]+bind[[:space:]]+127\.0\.0\.1[[:space:]]*$/ {next}
+          {print}
+        ' "$caddyfile" >"$scratch/Caddyfile"
+        reload_site "$scratch/Caddyfile"
+    fi
+    if ! ss -H -lntp '( sport = :8443 )' |
+        awk '$4 ~ /^(\*|0\.0\.0\.0|\[::\]):8443$/ && /"caddy"/ {found=1} END {exit !found}'; then
+        fail '未确认 Caddy 在 TCP 8443 对外监听，正在恢复原配置'
+    fi
+    auth_required "$domain" /profiles/five/all.sub
+}
+
 parse_five_ports() {
     local value=$1 port
     ports=(auto auto auto auto auto)
@@ -767,7 +802,6 @@ change_five_port() {
             if [[ -f $file ]]; then
                 domain=$(jq -er '.inbounds[] | select(.type=="vmess") | .tls.server_name' "$config")
                 valid_domain "$domain"
-                valid_domain "$domain"
                 auth_required "$domain" "/profiles/five/$label.$ext"
                 files+=("$file")
             fi
@@ -792,7 +826,11 @@ change_five_port() {
     printf '%s 端口已从 %s 改为 %s/%s。备份位于 %s\n' "$kind" "$old_port" "$new_port" "$transport" "$backup"
     echo '请核对云防火墙，从客户端重新导入受影响的节点并复测。'
     if [[ $kind == reality ]]; then
-        echo '若订阅使用 REALITY 入口，请在「客户端与订阅」→「发布五协议单节点及聚合订阅」查看并更新订阅地址。'
+        if [[ -n ${domain:-} ]] && fixed_subscription_block "$(site_block "$domain")"; then
+            echo '固定 HTTPS 订阅地址仍使用 TCP 8443，请在客户端刷新订阅。'
+        else
+            echo '若订阅使用 REALITY 入口，请在「客户端与订阅」→「发布五协议单节点及聚合订阅」查看并更新订阅地址。'
+        fi
     fi
 }
 
@@ -939,9 +977,9 @@ show_qr() {
 }
 
 five_share() {
-    local domain hash auth port url dir prefix=/profiles/five
+    local domain hash auth port reality_port url dir block prefix=/profiles/five
     dir="$(dirname -- "$(cfg "$five")")/profiles"
-    local i=0 link label ext handshake external=false
+    local i=0 link label ext handshake fixed=false
     local aliases=() encoded_aliases=()
     set_node_aliases
     domain=$(jq -r '.inbounds[] | select(.type=="vmess") | .tls.server_name // empty' "$(cfg "$five")")
@@ -983,16 +1021,20 @@ five_share() {
     fi
     [[ ${1:-} != --v2rayn ]] || fail '兼容链接仅用于无自有域名模式'
     valid_domain "$domain"
-    port=$(jq -er '.inbounds[0].listen_port' "$(cfg "$five")")
-    port_number "$port" || fail 'REALITY 端口无效'
+    reality_port=$(jq -er '.inbounds[0].listen_port' "$(cfg "$five")")
+    port_number "$reality_port" || fail 'REALITY 端口无效'
     handshake=$(jq -er '.inbounds[0].tls.reality.handshake.server' "$(cfg "$five")")
-    if [[ $handshake != 127.0.0.1 ]]; then external=true; port=8443; fi
+    block=''
+    if [[ -r $caddyfile ]]; then block=$(site_block "$domain"); fi
+    if [[ $handshake != 127.0.0.1 || ${2:-} == --fixed ]] || fixed_subscription_block "$block"; then
+        fixed=true
+    fi
+    port=$reality_port
+    if $fixed; then port=8443; fi
     url="https://$domain"
     if [[ $port != 443 ]]; then url+=":$port"; fi
     refresh_five_aliases "$dir"
     if [[ ${1:-} == --publish ]]; then
-        local block
-        block=$(site_block "$domain")
         if [[ $block != *"handle_path $prefix/*"* ]]; then
             [[ $(grep -cxF "$domain:8443 {" "$caddyfile") == 1 ]] || fail '未找到唯一的 8443 站点'
             auth_block
@@ -1017,6 +1059,7 @@ CADDY
                 auth_required "$domain" "$prefix/$label.$ext"
             done
         done
+        if $fixed; then enable_fixed_subscription "$domain"; fi
         profile_dir "$profiles"
         profile_dir "$profiles/five"
         for label in "${kinds[@]}" all; do
@@ -1024,20 +1067,9 @@ CADDY
                 put "$profiles/five/$label.$ext" 640 caddy <"$dir/$label.$ext"
             done
         done
-        if $external; then
-            caddy_port_available 8443
-            fw_open 8443/tcp subscription || fail '无法管理 HTTPS 订阅的 UFW 规则'
-            block=$(site_block "$domain")
-            if grep -Eq '^[[:space:]]+bind[[:space:]]+127\.0\.0\.1[[:space:]]*$' <<<"$block"; then
-                awk -v marker="$domain:8443 {" '
-                  $0 == marker {inside=1} inside && /^}/ {inside=0}
-                  inside && /^[[:space:]]+bind[[:space:]]+127\.0\.0\.1[[:space:]]*$/ {next}
-                  {print}
-                ' "$caddyfile" >"$scratch/Caddyfile"
-                reload_site "$scratch/Caddyfile"
-            fi
+        if $fixed; then
             fw_commit || fail '无法保存 HTTPS 订阅防火墙规则'
-            echo '请在云防火墙放行 TCP 8443，并从外网验证 HTTPS 订阅。'
+            echo '固定订阅入口使用 TCP 8443。请核对云防火墙并从外网验证 HTTPS 订阅。'
         fi
         site_backup=''
     fi
@@ -1058,6 +1090,11 @@ CADDY
         printf '\n%s聚合订阅，用户名 lax%s\n' "$accent" "$reset"
         show_qr "$url$prefix/all.sub"
         printf '聚合 sing-box JSON '; print_link "$url$prefix/all.json"
+        if $fixed && [[ $handshake == 127.0.0.1 ]]; then
+            local legacy_url="https://$domain"
+            if [[ $reality_port != 443 ]]; then legacy_url+=":$reality_port"; fi
+            printf '当前 REALITY 入口（旧订阅可继续使用） '; print_link "$legacy_url$prefix/all.sub"
+        fi
     fi
 }
 
@@ -1101,8 +1138,13 @@ five_summary() {
         -s $profiles/five/all.json && -s $profiles/five/all.sub ]]; then
         port=$(jq -r '.inbounds[] | select(.type=="vless") | .listen_port' "$config")
         handshake=$(jq -r '.inbounds[] | select(.type=="vless") | .tls.reality.handshake.server' "$config")
-        if [[ $handshake != 127.0.0.1 ]]; then port=8443; fi
-        printf ' HTTPS 订阅   已发布 · TCP %s\n' "$port"
+        if fixed_subscription_block "$block"; then
+            printf ' HTTPS 订阅   固定入口 · TCP 8443\n'
+        elif [[ $handshake == 127.0.0.1 ]]; then
+            printf ' HTTPS 订阅   已发布 · TCP %s\n' "$port"
+        else
+            echo ' HTTPS 订阅   固定入口未启用'
+        fi
     else
         echo ' HTTPS 订阅   未发布'
     fi
@@ -1118,7 +1160,7 @@ JC
   firewall-cleanup
   status [DOMAIN]
   five DOMAIN|- IP [--ports P1,P2,P3,P4,P5] [--uuid UUID] [--reality-target DOMAIN] [--reality-sni DOMAIN] [--preset-names HOST,HY2,TUIC,ANYTLS] [--template FILE] [--prepare-site yes]
-  five-share [--publish|--v2rayn]
+  five-share [--publish [--fixed]|--v2rayn]
   five-port PROTOCOL PORT
   five-address IP|--ipv4|--ipv6
 HELP
@@ -1184,7 +1226,9 @@ case "$command_name" in
         ip -6 addr show scope global
         if (( $# )); then valid_domain "$1"; getent ahosts "$1"; site_curl "$1" / -fsS; printf '\n'; fi;;
     five-share)
-        [[ $# == 0 || ( $# == 1 && ( $1 == --publish || $1 == --v2rayn ) ) ]] || fail '用法 five-share [--publish|--v2rayn]'
+        [[ $# == 0 || ( $# == 1 && ( $1 == --publish || $1 == --v2rayn ) ) ||
+           ( $# == 2 && $1 == --publish && $2 == --fixed ) ]] ||
+            fail '用法 five-share [--publish [--fixed]|--v2rayn]'
         five_share "$@";;
     five-address) [[ $# == 1 ]] || fail '用法 five-address IP|--ipv4|--ipv6'; change_five_address "$1";;
     five-port) [[ $# == 2 ]] || fail '用法 five-port PROTOCOL PORT'; change_five_port "$@";;

@@ -14,6 +14,16 @@ s=$(curl -4fsSL -m 25 "https://raw.githubusercontent.com/LauritzWu/jc-vps/$revis
 
 新部署可选「1 一键安装 sing-box」或直接回车。已有部署运行上述命令即可更新管理入口，节点无需重装。详见 [v1.4.0 发布说明](https://github.com/LauritzWu/jc-vps/releases/tag/v1.4.0)。
 
+### 管理入口开发版（包含本地运行）
+
+从包含此功能的固定提交下载并运行安装入口，可更新管理入口。验证过的脚本和模板安装到 `/usr/local/lib/jc`，之后 `jc` 从本地打开菜单，查看状态和日志时无需访问 GitHub。仍可在「系统工具」手动补齐工具依赖。从第二个本地版本起，运行 `jc --rollback` 可切回上一个已安装的管理入口。
+
+```bash
+revision=替换为含此功能的完整提交SHA
+s=$(curl -4fsSL -m 25 "https://raw.githubusercontent.com/LauritzWu/jc-vps/$revision/bootstrap.sh") &&
+  bash -c "$s" -- "$revision"
+```
+
 **v1.4.0 实测**覆盖 Ubuntu 24.04 LTS 的公网 IPv4 安装与卸载、SSH 重连、UFW 规则归属、Fail2ban 封禁保留、五协议代理、公信证书签发、HTTPS 订阅认证和 HY2 换端口及回滚。公网 IPv6、证书自然续期及使用外部 REALITY 握手目标的 HTTPS 订阅仍待本版实测。
 
 **历史版本验收范围**为 Ubuntu 24.04 LTS 和 Debian 13，均为 x86_64、IPv4。五个协议均通过公网连通测试，两套系统也通过了公信证书签发、订阅认证、重启恢复、内核切换和失败回退，以及卸载重装。五协议也已通过公网 IPv6 连通测试，IPv6 订阅已在隔离环境验收，分享链接已通过 v2rayN 导入检查。详见 [v1.1.0 发布说明](https://github.com/LauritzWu/jc-vps/releases/tag/v1.1.0)。
@@ -46,6 +56,7 @@ s=$(curl -4fsSL -m 25 "https://raw.githubusercontent.com/LauritzWu/jc-vps/$revis
 
 - 协议为 REALITY、VMess WS + TLS、Hysteria 2、TUIC 和 AnyTLS。可随机选端口，也可指定五个端口。随机检查本机监听，云防火墙还需单独放行。UUID 可生成或指定，三种密码型协议各自生成密码。
 - 在「客户端与订阅」选 1 查看五条链接和二维码，选 2 发布单节点和聚合订阅。节点按「协议-城市」命名，优先使用手动设置的地区。已发布的订阅可通过选 2 更新名称。订阅提供 sing-box JSON 和 Base64 链接格式，使用 HTTPS Basic Auth。
+- 使用包含本地管理入口的开发版本时，自有域名部署可在「客户端与订阅 → 启用固定 HTTPS 订阅入口」发布 TCP 8443 上的认证订阅。按提示放行云防火墙，验证后将订阅地址更新为 `https://你的域名:8443/profiles/five/all.sub`（聚合 Base64）或 `https://你的域名:8443/profiles/five/all.json`（聚合 sing-box 配置）。切换到固定地址后，更换 REALITY 节点端口无需重新添加订阅。启用时也保留当前 REALITY 端口上的旧入口。
 - REALITY 默认使用自有域名，也可手选预置站点、自动探测预置站点或手动填写外部握手目标。选外部目标时，该域名仅用于 REALITY 握手和 SNI，其余四个协议的 TLS 证书和 HTTPS 订阅仍需自有域名。自有目标模式使用 REALITY TCP 端口访问订阅，外部目标模式使用 TCP 8443，后者的公网订阅仍待端到端验收。
 - 在「客户端与订阅 → 刷新节点地址」可检测 VPS 的公网出口 IPv4/IPv6，或手动填写公网地址。确认后同步更新节点链接和已发布的订阅。若监听配置未覆盖所选地址族，脚本会停止操作。使用 NAT 或额外公网地址时，可手动填写实际入站地址。
 - 在「服务管理 → 更换单个五协议节点的端口」可单独换端口。脚本会备份配置并在应用失败时尝试回滚。请核对云防火墙，再重新导入受影响的节点并复测。
